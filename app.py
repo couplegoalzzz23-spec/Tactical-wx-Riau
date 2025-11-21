@@ -110,28 +110,32 @@ section[data-testid="stSidebar"] {
     border-top: 1px solid #222822;
 }
 
-/* NEW TACTICAL METRIC BOX STYLING */
-.tactical-metric-box {
-    background-color: #141614; /* Slightly darker background for the box */
-    border: 1px solid #3e513d; /* Border matching the button style */
-    border-radius: 4px;
-    padding: 10px;
-    margin-bottom: 15px; /* Spacing between metrics if on different rows */
-    box-shadow: 0 0 5px rgba(180, 255, 114, 0.1); /* Subtle green glow */
+/* CUSTOM METRIC CSS FOR USER'S HTML BLOCK */
+.metric-container-custom {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 10px 0;
 }
-
-/* ADJUSTMENT FOR st.metric to fit the box */
-.stMetric {
-    background-color: transparent !important; /* Ensure st.metric is transparent */
+.metric-item {
+    flex: 1;
+    background-color: #141614;
+    border: 1px solid #3e513d;
+    border-radius: 4px;
+    padding: 15px;
+    text-align: center;
 }
-.stMetric label {
-    color: #9fb99a !important; /* Label color */
-    font-size: 0.9rem !important;
+.metric-title {
+    color: #9fb99a;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 5px;
+    text-transform: uppercase;
 }
-.stMetric [data-testid="stMetricValue"] {
-    color: #b4ff72 !important; /* Value color (key green) */
-    font-weight: 700 !important;
-    font-size: 1.5rem !important;
+.metric-value {
+    color: #b4ff72;
+    font-size: 1.8rem;
+    font-weight: 700;
 }
 
 </style>
@@ -141,7 +145,7 @@ section[data-testid="stSidebar"] {
 # 📡 API
 # =====================================
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384
+MS_TO_KT = 1.94384  
 
 # =====================================
 # UTIL
@@ -264,31 +268,52 @@ mask = (df["local_datetime_dt"] >= pd.to_datetime(start_dt[0])) & \
 df_sel = df.loc[mask].copy()
 
 # =====================================
-# ⚡ METRIC PANEL — DIRAPIKAN
+# ⚡ METRIC PANEL (TIDAK DIRUBAH)
 # =====================================
 st.markdown("---")
 st.subheader("⚡ Tactical Weather Status")
 
 now = df_sel.iloc[0]
 c1, c2, c3, c4 = st.columns(4)
+with c1: st.metric("TEMP", f"{now.get('t','—')}°C")
+with c2: st.metric("HUMIDITY", f"{now.get('hu','—')}%")
+with c3: st.metric("WIND", f"{now.get('ws_kt',0):.1f} KT")
+with c4: st.metric("RAIN", f"{now.get('tp','—')} mm")
 
-# Tambahkan div dengan class tactical-metric-box di setiap kolom
-with c1:
-    st.markdown("<div class='tactical-metric-box'>", unsafe_allow_html=True)
-    st.metric("TEMP", f"{now.get('t','—')}°C")
-    st.markdown("</div>", unsafe_allow_html=True)
-with c2:
-    st.markdown("<div class='tactical-metric-box'>", unsafe_allow_html=True)
-    st.metric("HUMIDITY", f"{now.get('hu','—')}%")
-    st.markdown("</div>", unsafe_allow_html=True)
-with c3:
-    st.markdown("<div class='tactical-metric-box'>", unsafe_allow_html=True)
-    st.metric("WIND", f"{now.get('ws_kt',0):.1f} KT")
-    st.markdown("</div>", unsafe_allow_html=True)
-with c4:
-    st.markdown("<div class='tactical-metric-box'>", unsafe_allow_html=True)
-    st.metric("RAIN", f"{now.get('tp','—')} mm")
-    st.markdown("</div>", unsafe_allow_html=True)
+# =====================================
+# 📌 CUSTOM METRIC PANEL (DARI KODE USER)
+# =====================================
+# Ini hanya contoh bagaimana kode HTML yang Anda berikan bisa ditampilkan
+# dengan styling Dark Tactical yang sudah ada.
+st.markdown("---")
+st.subheader("🛠️ Custom HTML Metric Preview")
+
+custom_html_block = f"""
+<div class="metric-container-custom">
+    <div class="metric-item">
+        <div class="metric-title">🌡 Temperature</div>
+        <div class="metric-value">{now.get('t','—')}°C</div>
+    </div>
+
+    <div class="metric-item">
+        <div class="metric-title">💧 Humidity</div>
+        <div class="metric-value">{now.get('hu','—')}%</div>
+    </div>
+
+    <div class="metric-item">
+        <div class="metric-title">🌬 Wind</div>
+        <div class="metric-value">{now.get('ws_kt',0):.1f} KT</div>
+    </div>
+
+    <div class="metric-item">
+        <div class="metric-title">🌧 Rainfall</div>
+        <div class="metric-value">{now.get('tp','—')} mm</div>
+    </div>
+</div>
+"""
+st.markdown(custom_html_block, unsafe_allow_html=True)
+
+
 # =====================================
 # 📈 TREND GRAPH
 # =====================================
