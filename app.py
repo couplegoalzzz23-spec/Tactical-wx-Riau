@@ -231,18 +231,26 @@ mask = (df["local_datetime_dt"] >= start_dt[0]) & (df["local_datetime_dt"] <= st
 df_sel = df.loc[mask].copy()
 
 # =====================================
-# METRICS PANEL
+# ⚡ TACTICAL WEATHER STATUS (WITH UTC TIME)
 # =====================================
 st.markdown("---")
 st.subheader("⚡ Tactical Weather Status")
 
 now = df_sel.iloc[0]
 
-c1, c2, c3, c4 = st.columns(4)
+# 🕒 ADD UTC TIME (NEW)
+utc_val = now.get("utc_datetime_dt")
+if pd.notna(utc_val):
+    utc_str = utc_val.strftime("%H:%MZ")
+else:
+    utc_str = "—"
+
+c1, c2, c3, c4, c5 = st.columns(5)
 with c1: st.metric("🌡 TEMP", f"{now.get('t','—')}°C")
 with c2: st.metric("💧 HUM", f"{now.get('hu','—')}%")
 with c3: st.metric("🌬 WIND", f"{now.get('ws_kt',0):.1f} KT")
 with c4: st.metric("🌧 RAIN", f"{now.get('tp','—')} mm")
+with c5: st.metric("🕒 UTC TIME", utc_str)
 
 # =====================================
 # TREND GRAPH
