@@ -1,18 +1,20 @@
-# tactical_wx_ventusky_meteoblue_streamlit.py
-# Enhanced Streamlit weather dashboard inspired by Ventusky & Meteoblue
-# Robustified for graceful degradation (no errors if optional libs missing)
-# Requirements (recommended):
-# pip install streamlit requests pandas numpy plotly folium streamlit_folium branca
+# app.py
+# Tactical Weather — Robust Streamlit dashboard (Ventusky/Meteoblue style inspiration)
+# Usage: pip install streamlit requests pandas numpy plotly
+# Optional for map: pip install folium streamlit_folium
+#
+# Run: streamlit run app.py
 
+import os
 import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# Optional imports (fall back if not available)
+# Optional mapping libs (safe import)
 HAVE_FOLIUM = True
 try:
     import folium
@@ -28,34 +30,33 @@ except Exception:
     st_folium = None
 
 # -----------------------------
-# Configuration / Constants
+# CONFIG
 # -----------------------------
-st.set_page_config(page_title="Tactical Weather — Ventusky/Meteoblue Style", layout="wide")
+st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384
 
-# Placeholder for external tiles (set your provider URLs here if you have them)
-RADAR_TMS = ""
-FORECAST_TMS = ""
+# Optional tile overlays (set as env vars if you have URLs)
+RADAR_TMS = os.getenv("RADAR_TMS", "").strip()
+MODEL_TMS = os.getenv("MODEL_TMS", "").strip()
 
 # -----------------------------
-# Utilities
+# HELPERS
 # -----------------------------
 @st.cache_data(ttl=300)
 def fetch_forecast(adm1: str):
-    """
-    Fetch BMKG forecast for a given ADM1. Raises HTTPError if request fails.
-    """
+    """Fetch BMKG admin forecast. Raises requests exceptions on network errors."""
     params = {"adm1": adm1}
     resp = requests.get(API_BASE, params=params, timeout=12)
     resp.raise_for_status()
     return resp.json()
 
-
 def flatten_cuaca_entry(entry):
+    """Flatten BMKG 'cuaca' entry into a DataFrame with parsed datetimes and numeric types."""
     rows = []
-    lokasi = entry.get("lokasi", {})
-    for group in entry.get("cuaca", []) or []:
+    lokasi = entry.get("lokasi", {}) if isinstance(entry, dict) else {}
+    cuaca_groups = entry.get("cuaca", []) if isinstance(entry, dict) else []
+    for group in cuaca_groups or []:
         for obs in group or []:
             r = dict(obs) if isinstance(obs, dict) else {}
             r.update({
@@ -66,284 +67,330 @@ def flatten_cuaca_entry(entry):
                 "lon": lokasi.get("lon"),
                 "lat": lokasi.get("lat"),
             })
-            # parse datetimes if present
+            # parse datetimes defensively
             try:
-                r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime")) if r.get("utc_datetime") is not None else pd.NaT
-                r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime")) if r.get("local_datetime") is not None else pd.NaT
+                r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime")) if r.get("utc_datetime") else pd.NaT
+                r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime")) if r.get("local_datetime") else pd.NaT
             except Exception:
                 r["utc_datetime_dt"], r["local_datetime_dt"] = pd.NaT, pd.NaT
             rows.append(r)
     df = pd.DataFrame(rows)
-    # normalize numeric columns
+    # normalize numeric columns gracefully
     for c in ["t", "tcc", "tp", "wd_deg", "ws", "hu", "vs"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
-# -----------------------------
-# Sidebar Controls
-# -----------------------------
-with st.sidebar:
-    st.title("Tactical Controls — Ventusky Mode")
-    adm1 = st.text_input("Province Code (ADM1)", value="32")
-    st.markdown("---")
-    st.subheader("Map Layers")
-    base_tile = st.selectbox("Base Map", options=["OpenStreetMap", "Stamen Terrain", "CartoDB Positron"], index=0)
-    show_radarlayer = st.checkbox("Show Radar/Forecast Tile Layer (TMS)", value=False)
-    show_stations = st.checkbox("Show Stations / Observations", value=True)
-    show_choropleth = st.checkbox("Show Rain Proxy (circles)", value=False)
-    st.markdown("---")
-    st.subheader("Variable & Time")
-    var_choice = st.selectbox("Primary Variable", options=["t","hu","tp","ws","wd_deg"], index=0)
-    animate = st.checkbox("Enable simple animation (loop slider)", value=False)
-    st.markdown("---")
-    st.caption("Data source: BMKG forecast API — set RADAR_TMS/FORECAST_TMS in script for tile overlays")
+def nearest_row(df, dt_col, target_dt):
+    """Return nearest single-row DataFrame to target_dt (dt_col must be datetime64)."""
+    if df.empty:
+        return df
+    diffs = (pd.to_datetime(df[dt_col]) - pd.to_datetime(target_dt)).abs()
+    idx = diffs.idxmin()
+    return df.loc[[idx]]
 
 # -----------------------------
-# Fetch data
+# SIDEBAR CONTROLS
 # -----------------------------
-st.title("Tactical Weather — Ventusky / Meteoblue Inspired Dashboard")
-with st.spinner("Fetching BMKG forecast..."):
+with st.sidebar:
+    st.title("🛰️ Tactical Controls")
+    adm1 = st.text_input("Province Code (ADM1)", value="32")
+    st.markdown("<div style='text-align:center;'><small style='color:#5f5;'>Tactical Radar</small></div>", unsafe_allow_html=True)
+    st.markdown("---")
+    show_map = st.checkbox("Show Map", value=True)
+    show_table = st.checkbox("Show Forecast Table", value=False)
+    use_tiles = st.checkbox("Enable model/radar tiles (requires TMS URL env)", value=False)
+    show_wind_vectors = st.checkbox("Show Wind Vectors on Map", value=True)
+    st.markdown("---")
+    st.caption("Data Source: BMKG API — Theme: Tactical Ops")
+
+# -----------------------------
+# FETCH DATA
+# -----------------------------
+st.title("Tactical Weather Operations Dashboard")
+st.markdown("*Source: BMKG Forecast API — Live Data*")
+
+with st.spinner("🛰️ Acquiring weather intelligence..."):
     try:
         raw = fetch_forecast(adm1)
     except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch BMKG data: {e}")
+        st.error(f"Failed to fetch data from BMKG: {e}")
+        st.stop()
+    except Exception as e:
+        st.error(f"Unexpected error fetching data: {e}")
         st.stop()
 
+# Validate structure
 entries = raw.get("data", []) if isinstance(raw, dict) else []
 if not entries:
-    st.warning("No forecast data found for the given ADM1.")
+    st.warning("No forecast data available for the chosen ADM1.")
     st.stop()
 
-# Build mapping label -> entry
+# build mapping
 mapping = {}
 for e in entries:
     lok = e.get("lokasi", {}) if isinstance(e, dict) else {}
     label = lok.get("kotkab") or lok.get("adm2") or f"Location {len(mapping)+1}"
     mapping[label] = e
 
-col_main, col_side = st.columns([3,1])
-with col_side:
-    st.metric("Locations", len(mapping))
-with col_main:
-    loc_choice = st.selectbox("Select Location", options=list(mapping.keys()))
+# UI: location selector
+col1, col2 = st.columns([2,1])
+with col1:
+    loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
+with col2:
+    st.metric("📍 Locations", len(mapping))
 
 selected_entry = mapping.get(loc_choice)
-if not selected_entry:
-    st.error("Selected location data missing.")
+if selected_entry is None:
+    st.error("Selected location entry missing.")
     st.stop()
 
-# prepare dataframe
+# flatten into DataFrame
 df = flatten_cuaca_entry(selected_entry)
 if df.empty:
-    st.warning("No usable observations in selected location.")
+    st.warning("No valid weather records for selected location.")
     st.stop()
 
-# wind conversions and components (safe handling)
+# derived columns
 df["ws_kt"] = df.get("ws", pd.Series(dtype=float)) * MS_TO_KT
-wd = df.get("wd_deg", pd.Series(dtype=float)).fillna(0)
-ws = df.get("ws", pd.Series(dtype=float)).fillna(0)
-df["u"] = -ws * np.sin(np.deg2rad(wd))
-df["v"] = -ws * np.cos(np.deg2rad(wd))
+# fill missing wind dir/speed safely
+wd_series = df.get("wd_deg", pd.Series(dtype=float)).fillna(0)
+ws_series = df.get("ws", pd.Series(dtype=float)).fillna(0)
+df["u"] = -ws_series * np.sin(np.deg2rad(wd_series))
+df["v"] = -ws_series * np.cos(np.deg2rad(wd_series))
 
-# timeline handling
+# ensure at least one valid datetime
 if df["local_datetime_dt"].isna().all():
-    st.error("No valid datetimes in dataset.")
+    st.error("No valid datetime information available in dataset.")
     st.stop()
 
+# timeline indices to avoid tricky datetime slider issues
 times = pd.to_datetime(df["local_datetime_dt"]).sort_values().unique()
+times = [pd.to_datetime(t) for t in times]
 if len(times) == 0:
-    st.error("No timestamps available to build timeline.")
+    st.error("No timestamps present.")
     st.stop()
 
-# slider index
-time_idx = st.slider("Time index", 0, max(0, len(times)-1), value=len(times)-1)
-current_time = pd.to_datetime(times[time_idx])
+# slider over index
+time_index = st.slider("Time index (use to move timeline)", 0, max(0, len(times)-1), value=len(times)-1)
+current_time = times[time_index]
 
-# simple animation: if requested, advance slider using session state (non-blocking)
-if animate:
-    if "animate_idx" not in st.session_state:
-        st.session_state.animate_idx = time_idx
-    else:
-        # increment but wrap around
-        st.session_state.animate_idx = (st.session_state.animate_idx + 1) % len(times)
-    # override current_time with animated index so map/charts move
-    current_time = pd.to_datetime(times[st.session_state.animate_idx])
-
-# filter df for the selected time +/- tolerance
-tolerance = pd.Timedelta(hours=1)
+# select window (3-hour tolerance default)
+tolerance = pd.Timedelta(hours=3)
 mask = (df["local_datetime_dt"] >= current_time - tolerance) & (df["local_datetime_dt"] <= current_time + tolerance)
 df_sel = df.loc[mask].copy()
 if df_sel.empty:
-    # choose nearest single row to show
-    diffs = np.abs(pd.to_datetime(df["local_datetime_dt"]) - current_time)
-    nearest_idx = int(diffs.idxmin())
-    df_sel = df.iloc[[nearest_idx]].copy()
+    # fallback to nearest single row
+    df_sel = nearest_row(df, "local_datetime_dt", current_time)
 
 # -----------------------------
-# Metric panel
+# METRIC PANEL
 # -----------------------------
 st.markdown("---")
 st.subheader("⚡ Tactical Weather Status")
-now = df_sel.iloc[0]
+now = df_sel.iloc[0] if not df_sel.empty else df.iloc[0]
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    st.metric("TEMP (°C)", f"{now.get('t', '—')}°C")
+    temp_val = now.get("t", "—")
+    st.metric("TEMP (°C)", f"{temp_val}°C" if pd.notna(temp_val) else "—")
 with c2:
-    st.metric("HUMIDITY", f"{now.get('hu', '—')}%")
+    hu_val = now.get("hu", "—")
+    st.metric("HUMIDITY", f"{hu_val}%" if pd.notna(hu_val) else "—")
 with c3:
-    ws_kt_val = now.get('ws_kt') if pd.notna(now.get('ws_kt')) else 0
-    st.metric("WIND (KT)", f"{ws_kt_val:.1f}")
+    ws_kt_val = now.get("ws_kt", np.nan)
+    try:
+        st.metric("WIND (KT)", f"{ws_kt_val:.1f}")
+    except Exception:
+        st.metric("WIND (KT)", "—")
 with c4:
-    st.metric("RAIN (mm)", f"{now.get('tp', '—')}")
+    tp_val = now.get("tp", "—")
+    st.metric("RAIN (mm)", f"{tp_val}" if pd.notna(tp_val) else "—")
 
 # -----------------------------
-# Charts: trends
+# TREN GRAFIK
 # -----------------------------
 st.markdown("---")
 st.subheader("📊 Parameter Trends")
-col1, col2 = st.columns(2)
-with col1:
+df_sorted = df.sort_values("local_datetime_dt")
+# temperature
+if "t" in df.columns and df["t"].notna().any():
     try:
-        fig_t = px.line(df.sort_values('local_datetime_dt'), x='local_datetime_dt', y='t', title='Temperature (°C)', markers=True)
+        fig_t = px.line(df_sorted, x="local_datetime_dt", y="t", title="Temperature (°C)", markers=True)
         st.plotly_chart(fig_t, use_container_width=True)
     except Exception:
-        st.info('Temperature chart unavailable')
+        st.info("Temperature chart unavailable.")
+else:
+    st.info("Temperature data not available.")
+
+# humidity
+if "hu" in df.columns and df["hu"].notna().any():
     try:
-        fig_h = px.line(df.sort_values('local_datetime_dt'), x='local_datetime_dt', y='hu', title='Humidity (%)', markers=True)
+        fig_h = px.line(df_sorted, x="local_datetime_dt", y="hu", title="Humidity (%)", markers=True)
         st.plotly_chart(fig_h, use_container_width=True)
     except Exception:
-        st.info('Humidity chart unavailable')
-with col2:
+        st.info("Humidity chart unavailable.")
+else:
+    st.info("Humidity data not available.")
+
+# wind speed
+if "ws_kt" in df.columns and df["ws_kt"].notna().any():
     try:
-        fig_w = px.line(df.sort_values('local_datetime_dt'), x='local_datetime_dt', y='ws_kt', title='Wind Speed (KT)', markers=True)
+        fig_w = px.line(df_sorted, x="local_datetime_dt", y="ws_kt", title="Wind Speed (KT)", markers=True)
         st.plotly_chart(fig_w, use_container_width=True)
     except Exception:
-        st.info('Wind chart unavailable')
+        st.info("Wind chart unavailable.")
+else:
+    st.info("Wind speed data not available.")
+
+# rainfall
+if "tp" in df.columns and df["tp"].notna().any():
     try:
-        fig_r = px.bar(df.sort_values('local_datetime_dt'), x='local_datetime_dt', y='tp', title='Rainfall (mm)')
+        fig_r = px.bar(df_sorted, x="local_datetime_dt", y="tp", title="Rainfall (mm)")
         st.plotly_chart(fig_r, use_container_width=True)
     except Exception:
-        st.info('Rain chart unavailable')
+        st.info("Rain chart unavailable.")
+else:
+    st.info("Rainfall data not available.")
 
 # -----------------------------
-# Windrose
+# WINDROSE
 # -----------------------------
 st.markdown("---")
 st.subheader("🌪️ Windrose — Direction & Speed")
-if 'wd_deg' in df.columns and 'ws_kt' in df.columns:
-    df_wr = df.dropna(subset=['wd_deg', 'ws_kt']).copy()
-    if not df_wr.empty:
+if {"wd_deg", "ws_kt"}.issubset(df.columns) and df[["wd_deg","ws_kt"]].dropna().shape[0] > 0:
+    df_wr = df.dropna(subset=["wd_deg","ws_kt"]).copy()
+    try:
         bins_dir = np.arange(-11.25, 360, 22.5)
         labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
-        df_wr['dir_sector'] = pd.cut(df_wr['wd_deg'] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
+        df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
         speed_bins = [0,5,10,20,30,50,100]
         speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
-        df_wr['speed_class'] = pd.cut(df_wr['ws_kt'], bins=speed_bins, labels=speed_labels, include_lowest=True)
-        freq = df_wr.groupby(['dir_sector','speed_class']).size().reset_index(name='count')
-        freq['percent'] = freq['count']/freq['count'].sum()*100
-        az_map = {"N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,"SSE":157.5,
-                  "S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,"WNW":292.5,"NW":315,"NNW":337.5}
-        freq['theta'] = freq['dir_sector'].map(az_map)
-        colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
-        fig_wr = go.Figure()
-        for i, sc in enumerate(speed_labels):
-            subset = freq[freq['speed_class']==sc]
-            fig_wr.add_trace(go.Barpolar(r=subset['percent'], theta=subset['theta'], name=f"{sc} KT", marker_color=colors[i] if i < len(colors) else None))
-        fig_wr.update_layout(
-            title="Windrose (KT)",
-            polar=dict(
-                angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))),
-                radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")
-            ),
-            legend_title="Wind Speed Class",
-            template="plotly_dark"
-        )
-        st.plotly_chart(fig_wr, use_container_width=True)
-    else:
-        st.info('No wind data for windrose')
+        df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
+        freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
+        if freq["count"].sum() > 0:
+            freq["percent"] = freq["count"]/freq["count"].sum()*100
+            az_map = {"N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,"SSE":157.5,
+                      "S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,"WNW":292.5,"NW":315,"NNW":337.5}
+            freq["theta"] = freq["dir_sector"].map(az_map)
+            colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
+            fig_wr = go.Figure()
+            for i, sc in enumerate(speed_labels):
+                subset = freq[freq["speed_class"]==sc]
+                fig_wr.add_trace(go.Barpolar(
+                    r=subset["percent"], theta=subset["theta"],
+                    name=f"{sc} KT", marker_color=colors[i] if i < len(colors) else None, opacity=0.85
+                ))
+            fig_wr.update_layout(
+                title="Windrose (KT)",
+                polar=dict(
+                    angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))),
+                    radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")
+                ),
+                legend_title="Wind Speed Class",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig_wr, use_container_width=True)
+        else:
+            st.info("Not enough wind records for windrose.")
+    except Exception as e:
+        st.info(f"Windrose generation failed: {e}")
 else:
-    st.info('Wind data columns missing')
+    st.info("Wind direction/speed data not present.")
 
 # -----------------------------
-# Map display (folium if available, else fallback to Streamlit map)
+# MAP (Folium if available) otherwise fallback
 # -----------------------------
-show_map = True
-if HAVE_FOLIUM and st_folium is not None:
-    st.markdown("---")
-    st.subheader("🗺️ Tactical Map — Interactive")
-    lat = float(selected_entry.get("lokasi", {}).get("lat", 0) or 0)
-    lon = float(selected_entry.get("lokasi", {}).get("lon", 0) or 0)
-    try:
-        m = folium.Map(location=[lat, lon], zoom_start=7, tiles=None)
-        # base tiles
-        TileLayer('OpenStreetMap', name='OpenStreetMap', control=True).add_to(m)
-        TileLayer('Stamen Terrain', name='Stamen Terrain', control=True).add_to(m)
-        TileLayer('CartoDB Positron', name='CartoDB Positron', control=True).add_to(m)
-        # optional radar
-        if show_radarlayer and RADAR_TMS:
-            TileLayer(tiles=RADAR_TMS, name='Radar Tiles', attr='Provider', overlay=True, control=True).add_to(m)
-        # add observation markers
-        fg_obs = FeatureGroup(name='Observations', show=show_stations)
-        for _, row in df_sel.iterrows():
-            try:
-                rlat = float(row.get('lat', lat))
-                rlon = float(row.get('lon', lon))
-            except Exception:
-                rlat, rlon = lat, lon
-            popup_html = f"<b>{row.get('adm2','Station')}</b><br>Time: {row.get('local_datetime')}<br>Temp: {row.get('t','—')} °C<br>RH: {row.get('hu','—')}%<br>Wind: {row.get('ws_kt',0):.1f} KT @ {row.get('wd_deg','—')}°<br>Rain: {row.get('tp','—')} mm"
-            popup = Popup(popup_html, max_width=300)
-            CircleMarker(location=[rlat, rlon], radius=6, color='#00ffbf', fill=True, fill_opacity=0.9, popup=popup).add_to(fg_obs)
-        m.add_child(fg_obs)
-        # wind vectors
-        fg_wind = FeatureGroup(name='Wind Vectors', show=True)
-        for _, row in df_sel.dropna(subset=['ws','wd_deg']).iterrows():
-            try:
-                rlat = float(row.get('lat', lat))
-                rlon = float(row.get('lon', lon))
-                spd = float(row.get('ws', 0))
-                wd = float(row.get('wd_deg', 0))
-            except Exception:
-                continue
-            dlat = -0.02 * spd * np.cos(np.deg2rad(wd))
-            dlon = 0.02 * spd * np.sin(np.deg2rad(wd))
-            PolyLine(locations=[[rlat, rlon], [rlat+dlat, rlon+dlon]], color='#a9df52', weight=2).add_to(fg_wind)
-        m.add_child(fg_wind)
-        folium.LayerControl().add_to(m)
-        st_folium(m, width=900, height=500)
-    except Exception as e:
-        st.warning(f"Folium map failed: {e}")
-        st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
-else:
-    # fallback simple map
-    st.markdown("---")
-    st.subheader("🗺️ Tactical Map — Simple (folium unavailable)")
+st.markdown("---")
+if show_map:
+    st.subheader("🗺️ Tactical Map")
+    lat = None
+    lon = None
     try:
         lat = float(selected_entry.get("lokasi", {}).get("lat", 0) or 0)
         lon = float(selected_entry.get("lokasi", {}).get("lon", 0) or 0)
-        st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
+    except Exception:
+        lat, lon = 0.0, 0.0
+
+    if HAVE_FOLIUM and st_folium is not None:
+        try:
+            m = folium.Map(location=[lat, lon], zoom_start=7, tiles=None)
+            TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
+            TileLayer("Stamen Terrain", name="Terrain").add_to(m)
+            TileLayer("CartoDB Positron", name="Positron").add_to(m)
+            if use_tiles and RADAR_TMS:
+                TileLayer(tiles=RADAR_TMS, name="Radar Tiles", overlay=True, control=True).add_to(m)
+            if use_tiles and MODEL_TMS:
+                TileLayer(tiles=MODEL_TMS, name="Model Tiles", overlay=True, control=True).add_to(m)
+            # add station markers (df_sel)
+            if not df_sel.empty:
+                fg = FeatureGroup(name="Observations", show=True)
+                for _, row in df_sel.iterrows():
+                    try:
+                        rlat = float(row.get("lat", lat) or lat)
+                        rlon = float(row.get("lon", lon) or lon)
+                    except Exception:
+                        rlat, rlon = lat, lon
+                    popup_html = f"<b>{row.get('adm2','Station')}</b><br>Time: {row.get('local_datetime')}<br>Temp: {row.get('t','—')} °C<br>RH: {row.get('hu','—')}%<br>Wind: {row.get('ws_kt',0):.1f} KT @ {row.get('wd_deg','—')}°<br>Rain: {row.get('tp','—')} mm"
+                    Popup(popup_html, max_width=300).add_to(fg)
+                    CircleMarker(location=[rlat, rlon], radius=6, color="#00ffbf", fill=True, fill_opacity=0.9).add_to(fg)
+                m.add_child(fg)
+            # wind vectors
+            if show_wind_vectors and not df_sel.dropna(subset=["ws","wd_deg"]).empty:
+                fg2 = FeatureGroup(name="Wind Vectors", show=True)
+                for _, row in df_sel.dropna(subset=["ws","wd_deg"]).iterrows():
+                    try:
+                        rlat = float(row.get("lat", lat) or lat)
+                        rlon = float(row.get("lon", lon) or lon)
+                        spd = float(row.get("ws", 0))
+                        wd = float(row.get("wd_deg", 0))
+                    except Exception:
+                        continue
+                    dlat = -0.02 * spd * np.cos(np.deg2rad(wd))
+                    dlon = 0.02 * spd * np.sin(np.deg2rad(wd))
+                    PolyLine(locations=[[rlat, rlon], [rlat + dlat, rlon + dlon]], color="#a9df52", weight=2).add_to(fg2)
+                m.add_child(fg2)
+            folium.LayerControl().add_to(m)
+            st_folium(m, width=1000, height=600)
+        except Exception as e:
+            st.warning(f"Folium map render failed: {e}. Falling back to simple st.map.")
+            try:
+                st.map(pd.DataFrame({"lat":[lat], "lon":[lon]}))
+            except Exception as ee:
+                st.error(f"Map fallback failed: {ee}")
+    else:
+        # simple fallback
+        try:
+            st.map(pd.DataFrame({"lat":[lat], "lon":[lon]}))
+        except Exception as e:
+            st.warning(f"Map unavailable: {e}")
+
+# -----------------------------
+# FORECAST TABLE (optional)
+# -----------------------------
+st.markdown("---")
+if show_table:
+    st.subheader("📋 Forecast Table")
+    try:
+        st.dataframe(df_sorted.reset_index(drop=True))
     except Exception as e:
-        st.warning(f"Map unavailable: {e}")
+        st.info(f"Unable to show table: {e}")
 
 # -----------------------------
-# Forecast table (collapsible)
-# -----------------------------
-with st.expander("Show forecast table"):
-    st.dataframe(df.sort_values('local_datetime_dt'))
-
-# -----------------------------
-# Export
+# EXPORT
 # -----------------------------
 st.markdown("---")
 st.subheader("💾 Export Data")
-csv = df.to_csv(index=False)
-json_text = df.to_json(orient='records', force_ascii=False, date_format='iso')
-colx, coly = st.columns(2)
-with colx:
-    st.download_button("⬇️ Download CSV", data=csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
-with coly:
-    st.download_button("⬇️ Download JSON", data=json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
+try:
+    csv = df_sorted.to_csv(index=False)
+    json_text = df_sorted.to_json(orient="records", force_ascii=False, date_format="iso")
+    colx, coly = st.columns(2)
+    with colx:
+        st.download_button("⬇️ Download CSV", data=csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
+    with coly:
+        st.download_button("⬇️ Download JSON", data=json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
+except Exception as e:
+    st.info(f"Export not available: {e}")
 
-# Footer
+# FOOTER
 st.markdown("---")
-st.caption('Tactical Weather Ops Dashboard — BMKG Data © 2025 — Designed for robust execution')
+st.caption("Tactical Weather Ops Dashboard — BMKG Data. For Ventusky-like animated wind fields, provide model tile (TMS/WMS) URLs using RADAR_TMS/MODEL_TMS environment variables.")
