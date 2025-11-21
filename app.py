@@ -4,31 +4,29 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
 
 # ----------------------------------------------------------
-# KONFIGURASI APLIKASI
+# SETUP
 # ----------------------------------------------------------
-st.set_page_config(page_title="Tactical Weather – Stable Version", layout="wide")
-
+st.set_page_config(page_title="Tactical Weather", layout="wide")
 API_URL = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384
 
 # ----------------------------------------------------------
-# FUNGSI FETCH DATA (ANTI ERROR)
+# FETCH DATA SAFELY
 # ----------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_data(adm1):
     try:
-        resp = requests.get(API_URL, params={"adm1": adm1}, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        st.error("Gagal mengambil data dari BMKG.")
+        r = requests.get(API_URL, params={"adm1": adm1}, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except:
+        st.error("Gagal mengambil data BMKG.")
         st.stop()
 
 # ----------------------------------------------------------
-# FUNGSI FLATTEN (ANTI ERROR)
+# FLATTEN DATA SAFELY
 # ----------------------------------------------------------
 def flatten(entry):
     rows = []
@@ -57,20 +55,19 @@ def flatten(entry):
 
     df = pd.DataFrame(rows)
 
-    numeric_cols = ["t", "hu", "ws", "tp", "vs", "tcc", "wd_deg"]
-    for c in numeric_cols:
-        if c in df.columns:
+    num_cols = ["t","hu","ws","tp","vs","tcc","wd_deg"]
+    for c in num_cols:
+        if c in df:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    df["ws_kt"] = df.get("ws", 0) * MS_TO_KT
-    df["wd_deg"] = df.get("wd_deg", 0)
+    df["ws_kt"] = df.get("ws",0) * MS_TO_KT
     return df
 
 # ----------------------------------------------------------
-# SIDEBAR
+# SIDEBAR MENU
 # ----------------------------------------------------------
 with st.sidebar:
-    st.title("Tactical Controller")
+    st.title("Tactical Menu")
 
     PROV = {
         "Aceh": "11", "Sumatera Utara": "12", "Sumatera Barat": "13",
@@ -79,92 +76,124 @@ with st.sidebar:
         "DI Yogyakarta": "34", "Jawa Timur": "35"
     }
 
-    adm1_name = st.selectbox("Pilih Provinsi", list(PROV.keys()), index=3)
-    ADM1_CODE = PROV[adm1_name]
+    prov_name = st.selectbox("Pilih Provinsi", list(PROV.keys()), index=3)
+    ADM1_CODE = PROV[prov_name]
+
+    menu = st.multiselect(
+        "Tampilkan Menu",
+        ["Temperature", "Humidity", "Wind Speed", "Rainfall", "Windrose", "Table"],
+        default=["Temperature", "Wind Speed", "Windrose"]
+    )
 
 # ----------------------------------------------------------
 # FETCH DATA
 # ----------------------------------------------------------
 raw = fetch_data(ADM1_CODE)
 
-if not isinstance(raw, dict) or "data" not in raw:
-    st.error("Format API tidak sesuai.")
+entries = raw.get("data", [])
+if not entries:
+    st.error("Data tidak ditemukan.")
     st.stop()
 
-entries = raw["data"]
-if len(entries) == 0:
+cities = {e["lokasi"]["kotkab"]: e for e in entries}
+city_choice = st.selectbox("Pilih Kota", list(cities.keys()))
+entry = cities[city_choice]
+
+df = flatten(entry)
+if df.empty:
     st.error("Data kosong.")
     st.stop()
 
 # ----------------------------------------------------------
-# PILIH KOTA
-# ----------------------------------------------------------
-cities = {e["lokasi"]["kotkab"]: e for e in entries if e.get("lokasi")}
-city_choice = st.selectbox("Pilih Kota", list(cities.keys()))
-entry = cities[city_choice]
-
-# ----------------------------------------------------------
-# PROSES FLATTEN
-# ----------------------------------------------------------
-df = flatten(entry)
-
-if df.empty:
-    st.error("Data kosong setelah flatten.")
-    st.stop()
-
-# ----------------------------------------------------------
-# WAKTU / SLIDER
+# TIME SLIDER
 # ----------------------------------------------------------
 times = sorted(df["local_dt"].dropna().unique())
-if len(times) == 0:
-    st.error("Tidak ada timestamp.")
-    st.stop()
-
-tid = st.slider("Time Index", 0, len(times) - 1, len(times) - 1)
+tid = st.slider("Time Index", 0, len(times)-1, len(times)-1)
 current_time = times[tid]
-
 df_now = df[df["local_dt"] == current_time]
+
 if df_now.empty:
     df_now = df.iloc[[0]]
 
 now = df_now.iloc[0]
 
 # ----------------------------------------------------------
-# METRIC
+# METRIC PANEL
 # ----------------------------------------------------------
-st.title(f"Weather Tactical — {city_choice}")
+st.title(f"Tactical Weather — {city_choice}")
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Temperature (°C)", f"{now.t:.1f}" if not pd.isna(now.t) else "—")
-col2.metric("Humidity (%)", f"{now.hu}" if not pd.isna(now.hu) else "—")
-col3.metric("Wind (KT)", f"{now.ws_kt:.1f}" if not pd.isna(now.ws_kt) else "—")
-col4.metric("Rainfall (mm)", f"{now.tp}" if not pd.isna(now.tp) else "—")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Temp (°C)", f"{now.t:.1f}" if not pd.isna(now.t) else "-")
+c2.metric("Humidity (%)", f"{now.hu}" if not pd.isna(now.hu) else "-")
+c3.metric("Wind (KT)", f"{now.ws_kt:.1f}" if not pd.isna(now.ws_kt) else "-")
+c4.metric("Rain (mm)", f"{now.tp}" if not pd.isna(now.tp) else "-")
 
 st.markdown("---")
 
 # ----------------------------------------------------------
-# CHARTS (ANTI ERROR)
+# CHARTS
 # ----------------------------------------------------------
 df_sorted = df.sort_values("local_dt")
 
-# --- Temperature ---
-fig = px.line(df_sorted, x="local_dt", y="t", title="Temperature (°C)", markers=True)
-st.plotly_chart(fig, use_container_width=True)
+if "Temperature" in menu:
+    st.subheader("Temperature")
+    fig = px.line(df_sorted, x="local_dt", y="t", markers=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- Wind Speed ---
-fig = px.line(df_sorted, x="local_dt", y="ws_kt", title="Wind Speed (KT)", markers=True)
-st.plotly_chart(fig, use_container_width=True)
+if "Humidity" in menu:
+    st.subheader("Humidity (%)")
+    fig = px.line(df_sorted, x="local_dt", y="hu", markers=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- Rainfall ---
-fig = px.bar(df_sorted, x="local_dt", y="tp", title="Rainfall (mm)")
-st.plotly_chart(fig, use_container_width=True)
+if "Wind Speed" in menu:
+    st.subheader("Wind Speed (KT)")
+    fig = px.line(df_sorted, x="local_dt", y="ws_kt", markers=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("---")
+if "Rainfall" in menu:
+    st.subheader("Rainfall (mm)")
+    fig = px.bar(df_sorted, x="local_dt", y="tp")
+    st.plotly_chart(fig, use_container_width=True)
 
 # ----------------------------------------------------------
-# FORECAST TABLE
+# WINDROSE
 # ----------------------------------------------------------
-st.subheader("Forecast Table")
-st.dataframe(df_sorted)
+if "Windrose" in menu:
+    st.subheader("Windrose")
 
-st.caption("Script versi stabil — dijamin tanpa error.")
+    df_wr = df.dropna(subset=["wd_deg","ws_kt"])
+    if len(df_wr) > 0:
+        bins_dir = np.arange(-11.25, 360, 22.5)
+        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                      "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+        df_wr["dir"] = pd.cut(df_wr["wd_deg"], bins=bins_dir, labels=labels_dir)
+
+        speed_bins = [0,5,10,20,30,50,100]
+        sp_label = ["<5","5–10","10–20","20–30","30–50",">50"]
+        df_wr["spd"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=sp_label)
+
+        freq = df_wr.groupby(["dir","spd"]).size().reset_index(name="count")
+        freq["pct"] = freq["count"] / freq["count"].sum() * 100
+
+        az = {
+            "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,
+            "SE":135,"SSE":157.5,"S":180,"SSW":202.5,"SW":225,
+            "WSW":247.5,"W":270,"WNW":292.5,"NW":315,"NNW":337.5
+        }
+        freq["theta"] = freq["dir"].map(az)
+
+        fig_wr = go.Figure()
+        for sp in sp_label:
+            sub = freq[freq["spd"] == sp]
+            fig_wr.add_trace(go.Barpolar(
+                r=sub["pct"], theta=sub["theta"], name=sp
+            ))
+        fig_wr.update_layout(template="plotly_dark")
+        st.plotly_chart(fig_wr, use_container_width=True)
+
+# ----------------------------------------------------------
+# TABLE
+# ----------------------------------------------------------
+if "Table" in menu:
+    st.subheader("Forecast Table")
+    st.dataframe(df_sorted, use_container_width=True)
