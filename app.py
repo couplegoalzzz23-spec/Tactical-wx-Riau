@@ -36,7 +36,6 @@ section[data-testid="stSidebar"] {
     border-right: 1px solid #1f271f;
 }
 
-/* Sidebar Title */
 .sidebar-title {
     font-size: 1.4rem;
     font-weight: 800;
@@ -45,7 +44,6 @@ section[data-testid="stSidebar"] {
     padding-bottom: 8px;
 }
 
-/* Tactical Container */
 .tactical-box {
     border: 1px solid #223122;
     border-radius: 8px;
@@ -55,7 +53,6 @@ section[data-testid="stSidebar"] {
     box-shadow: inset 0 0 5px #132113;
 }
 
-/* LABEL */
 .sidebar-label {
     font-size: 0.85rem;
     font-weight: 600;
@@ -91,7 +88,6 @@ section[data-testid="stSidebar"] {
   to { transform: rotate(360deg); }
 }
 
-/* Divider */
 .divider {
     margin: 12px 0;
     border-top: 1px solid #223322;
@@ -143,19 +139,17 @@ def flatten_cuaca_entry(entry):
     return df
 
 # =====================================
-# 🎚️ SIDEBAR — IMPROVED PERFECT VERSION
+# 🎚️ SIDEBAR — PREMIUM
 # =====================================
 with st.sidebar:
 
     st.markdown("<div class='sidebar-title'>TACTICAL CONTROL PANEL</div>", unsafe_allow_html=True)
 
-    # Radar
     st.markdown("<div class='tactical-box'>", unsafe_allow_html=True)
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#82ff9b;'>System Online — Scanning...</p>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------------- PROVINCE INPUT ----------------
     st.markdown("<div class='tactical-box'>", unsafe_allow_html=True)
     st.markdown("<div class='sidebar-label'>Province Code (ADM1)</div>", unsafe_allow_html=True)
     adm1 = st.text_input("", value="32")
@@ -163,15 +157,13 @@ with st.sidebar:
     refresh = st.button("🔄 Refresh Data")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------------- DISPLAY OPTIONS ----------------
     st.markdown("<div class='tactical-box'>", unsafe_allow_html=True)
     st.markdown("<div class='sidebar-label'>Display Options</div>", unsafe_allow_html=True)
-    show_map = st.checkbox("🗺 Show Map", value=True)
+    show_map = st.checkbox("🗺 Show Map (Premium)", value=True)
     show_table = st.checkbox("📋 Show Table", value=False)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------------- FOOTER ----------------
-    st.caption("BMKG API | Tactical Ops UI v3.0")
+    st.caption("BMKG API | Tactical Ops UI v4.2")
 
 # =====================================
 # 📡 API FETCH
@@ -191,7 +183,7 @@ if not entries:
     st.warning("No forecast data available.")
     st.stop()
 
-# LOCATION SELECTOR
+# LOCATION SELECTOR (you requested NOT to change)
 mapping = {}
 for e in entries:
     lok = e.get("lokasi", {})
@@ -214,7 +206,9 @@ if df.empty:
 df["ws_kt"] = df["ws"] * MS_TO_KT
 df = df.sort_values("local_datetime_dt")
 
-# TIME RANGE SLIDER
+# =====================================
+# TIME RANGE
+# =====================================
 st.markdown("### ⏱ Time Filter")
 min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
 max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
@@ -231,26 +225,53 @@ mask = (df["local_datetime_dt"] >= start_dt[0]) & (df["local_datetime_dt"] <= st
 df_sel = df.loc[mask].copy()
 
 # =====================================
-# ⚡ TACTICAL WEATHER STATUS (WITH UTC TIME)
+# EXTRA CALCULATIONS
+# =====================================
+
+def calc_dew_point(T, RH):
+    a, b = 17.27, 237.7
+    alpha = ((a * T) / (b + T)) + np.log(RH/100)
+    return (b * alpha) / (a - alpha)
+
+def calc_heat_index(T, RH):
+    return T + 0.33*RH - 0.7
+
+def visibility_rating(v):
+    if v >= 8000: return "Good"
+    if v >= 3000: return "Moderate"
+    return "Poor"
+
+df_sel["dew_point"] = calc_dew_point(df_sel["t"], df_sel["hu"])
+df_sel["heat_index"] = calc_heat_index(df_sel["t"], df_sel["hu"])
+df_sel["vis_rate"] = df_sel["vs"].apply(lambda x: visibility_rating(x) if pd.notna(x) else "Unknown")
+
+# =====================================
+# DAY / NIGHT OPS MODE
+# =====================================
+first = df_sel.iloc[0]
+hour = first["local_datetime_dt"].hour
+ops_mode = "🌞 DAY OPS" if 6 <= hour <= 18 else "🌙 NIGHT OPS"
+
+# =====================================
+# METRICS PANEL
 # =====================================
 st.markdown("---")
-st.subheader("⚡ Tactical Weather Status")
+st.subheader(f"⚡ Tactical Weather Status — {ops_mode}")
 
 now = df_sel.iloc[0]
 
-# 🕒 ADD UTC TIME (NEW)
-utc_val = now.get("utc_datetime_dt")
-if pd.notna(utc_val):
-    utc_str = utc_val.strftime("%H:%MZ")
-else:
-    utc_str = "—"
-
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4 = st.columns(4)
 with c1: st.metric("🌡 TEMP", f"{now.get('t','—')}°C")
 with c2: st.metric("💧 HUM", f"{now.get('hu','—')}%")
 with c3: st.metric("🌬 WIND", f"{now.get('ws_kt',0):.1f} KT")
 with c4: st.metric("🌧 RAIN", f"{now.get('tp','—')} mm")
-with c5: st.metric("🕒 UTC TIME", utc_str)
+
+c5, c6, c7 = st.columns(3)
+with c5: st.metric("💨 DEW POINT", f"{now['dew_point']:.1f}°C")
+with c6: st.metric("🔥 HEAT INDEX", f"{now['heat_index']:.1f}°C")
+with c7: st.metric("👁 VISIBILITY", f"{now.get('vs','—')} m ({now['vis_rate']})")
+
+st.info(f"🕒 UTC Time: **{now['utc_datetime_dt']}**")
 
 # =====================================
 # TREND GRAPH
@@ -262,6 +283,7 @@ c1, c2 = st.columns(2)
 with c1:
     st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
     st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
+
 with c2:
     st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind Speed (KT)"), use_container_width=True)
     st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
@@ -306,17 +328,39 @@ if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
         st.plotly_chart(fig, use_container_width=True)
 
 # =====================================
-# MAP
+# PREMIUM OPS MAP — FOLIUM (Safe)
 # =====================================
 if show_map:
     st.markdown("---")
-    st.subheader("🗺 Tactical Map")
+    st.subheader("🗺 Tactical Ops Map (Premium)")
+
+    lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
+    lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
+
     try:
-        lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
-        lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
-        st.map(pd.DataFrame({"lat":[lat], "lon":[lon]}))
+        import folium
+        from streamlit_folium import st_folium
+
+        m = folium.Map(location=[lat, lon], zoom_start=9, tiles="CartoDB dark_matter")
+
+        folium.Marker(
+            [lat, lon],
+            tooltip=f"{loc_choice}",
+            icon=folium.Icon(color="green", icon="crosshairs")
+        ).add_to(m)
+
+        folium.Circle(
+            radius=15000,
+            location=[lat, lon],
+            color="#39ff14",
+            fill=True,
+            fill_opacity=0.15
+        ).add_to(m)
+
+        st_folium(m, width=900, height=500)
+
     except:
-        st.warning("Map unavailable.")
+        st.map(pd.DataFrame({"lat":[lat], "lon":[lon]}))
 
 # =====================================
 # TABLE
@@ -346,6 +390,6 @@ st.markdown("""
 ---
 <div style="text-align:center; color:#7a7; font-size:0.9rem;">
 Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
-Stealth Tactical UI v3.0 | Streamlit + Plotly
+Stealth Tactical UI v4.2 | Streamlit + Plotly + Folium
 </div>
 """, unsafe_allow_html=True)
