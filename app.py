@@ -12,7 +12,7 @@ from datetime import datetime
 st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =====================================
-# 🎨 CSS — DARK STEALTH TACTICAL UI (FINAL)
+# 🎨 IMPROVED ULTRA-PREMIUM STEALTH UI
 # =====================================
 st.markdown("""
 <style>
@@ -23,91 +23,78 @@ body {
     font-family: "Consolas", "Roboto Mono", monospace;
 }
 
-/* HEADERS */
+/* HEADER STYLE */
 h1, h2, h3, h4 {
-    color: #b4ff72;
+    color: #b4ff72 !important;
     text-transform: uppercase;
-    letter-spacing: 1px;
 }
 
-/* SIDEBAR WRAPPER */
+/* ------------ SIDEBAR ------------- */
 section[data-testid="stSidebar"] {
-    background-color: #0e100e;
-    padding: 25px 20px 25px 20px !important;
-    border-right: 1px solid #1b1f1b;
+    background-color: #0f110f !important;
+    padding: 25px !important;
+    border-right: 1px solid #1f271f;
 }
 
-/* SIDEBAR TITLE */
+/* Sidebar Title */
 .sidebar-title {
-    font-size: 1.2rem;
-    font-weight: bold;
+    font-size: 1.4rem;
+    font-weight: 800;
     color: #b4ff72;
-    margin-bottom: 10px;
     text-align: center;
+    padding-bottom: 8px;
 }
 
-/* INPUT LABELS */
+/* Tactical Container */
+.tactical-box {
+    border: 1px solid #223122;
+    border-radius: 8px;
+    padding: 15px 12px;
+    margin-bottom: 20px;
+    background-color: #111411;
+    box-shadow: inset 0 0 5px #132113;
+}
+
+/* LABEL */
 .sidebar-label {
     font-size: 0.85rem;
     font-weight: 600;
-    color: #9fb99a;
-    margin-bottom: -6px;
+    color: #98b792;
+    margin-bottom: 4px;
 }
 
-/* CLEAN CHECKBOX */
-.stCheckbox label {
-    color: #d0d6c4 !important;
-    font-size: 0.9rem !important;
-}
-
-/* BEAUTIFY BUTTON */
-.stButton>button {
-    background-color: #1a2a1e;
-    color: #b4ff72;
-    border: 1px solid #3e513d;
-    border-radius: 6px;
-    font-weight: 700;
-    width: 100%;
-    padding: 8px 0px;
-}
-.stButton>button:hover {
-    background-color: #233726;
-    border-color: #b4ff72;
-    color: #e3ffcd;
-}
-
-/* RADAR */
+/* Radar */
 .radar {
   position: relative;
-  width: 170px;
-  height: 170px;
+  width: 160px;
+  height: 160px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(20,255,50,0.06) 20%, transparent 21%),
-              radial-gradient(circle, rgba(20,255,50,0.10) 10%, transparent 11%);
-  background-size: 20px 20px;
+  background: radial-gradient(circle, rgba(20,255,50,0.06) 20%, transparent 21%);
+  background-size: 22px 22px;
   border: 2px solid #41ff6c;
   overflow: hidden;
   margin: auto;
-  box-shadow: 0 0 20px #39ff61;
+  margin-bottom: 5px;
+  box-shadow: 0 0 14px #39ff61;
 }
 .radar:before {
   content: "";
   position: absolute;
   top: 0; left: 0;
-  width: 60%; height: 2px;
+  width: 65%; height: 2px;
   background: linear-gradient(90deg, #3dff6f, transparent);
   transform-origin: 100% 50%;
-  animation: sweep 2.5s linear infinite;
+  animation: sweep 2.8s linear infinite;
 }
 @keyframes sweep {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
-/* DIVIDERS */
+/* Divider */
 .divider {
-    margin: 18px 0px;
-    border-top: 1px solid #222822;
+    margin: 12px 0;
+    border-top: 1px solid #223322;
 }
 
 </style>
@@ -156,42 +143,47 @@ def flatten_cuaca_entry(entry):
     return df
 
 # =====================================
-# 🎚️ SIDEBAR — STEALTH UI (FINAL)
+# 🎚️ SIDEBAR — IMPROVED PERFECT VERSION
 # =====================================
 with st.sidebar:
 
-    st.markdown("<div class='sidebar-title'>TACTICAL CONTROLS</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sidebar-title'>TACTICAL CONTROL PANEL</div>", unsafe_allow_html=True)
 
+    # Radar
+    st.markdown("<div class='tactical-box'>", unsafe_allow_html=True)
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#7aff9b;'>System Online — Scanning</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:#82ff9b;'>System Online — Scanning...</p>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-
+    # ---------------- PROVINCE INPUT ----------------
+    st.markdown("<div class='tactical-box'>", unsafe_allow_html=True)
     st.markdown("<div class='sidebar-label'>Province Code (ADM1)</div>", unsafe_allow_html=True)
     adm1 = st.text_input("", value="32")
-
-    refresh = st.button("🔄 Fetch Data")
-
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+    refresh = st.button("🔄 Refresh Data")
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    # ---------------- DISPLAY OPTIONS ----------------
+    st.markdown("<div class='tactical-box'>", unsafe_allow_html=True)
     st.markdown("<div class='sidebar-label'>Display Options</div>", unsafe_allow_html=True)
-    show_map = st.checkbox("Show Map", value=True)
-    show_table = st.checkbox("Show Table", value=False)
+    show_map = st.checkbox("🗺 Show Map", value=True)
+    show_table = st.checkbox("📋 Show Table", value=False)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-    st.caption("BMKG API | Tactical Ops UI v2.0")
+    # ---------------- FOOTER ----------------
+    st.caption("BMKG API | Tactical Ops UI v3.0")
 
 # =====================================
-# 📡 PENGAMBILAN DATA
+# 📡 API FETCH
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
 st.markdown("*Live Weather Intelligence — BMKG Forecast API*")
 
-with st.spinner("🛰️ Acquiring weather intelligence..."):
+with st.spinner("🛰 Acquiring weather data…"):
     try:
         raw = fetch_forecast(adm1)
     except Exception as e:
-        st.error(f"Failed to fetch data: {e}")
+        st.error(f"API Error: {e}")
         st.stop()
 
 entries = raw.get("data", [])
@@ -199,6 +191,7 @@ if not entries:
     st.warning("No forecast data available.")
     st.stop()
 
+# LOCATION SELECTOR
 mapping = {}
 for e in entries:
     lok = e.get("lokasi", {})
@@ -213,47 +206,46 @@ with col2:
 
 selected_entry = mapping[loc_choice]["entry"]
 df = flatten_cuaca_entry(selected_entry)
+
 if df.empty:
     st.warning("No valid weather data found.")
     st.stop()
 
 df["ws_kt"] = df["ws"] * MS_TO_KT
-df = df.sort_values("utc_datetime_dt")
+df = df.sort_values("local_datetime_dt")
 
-if df["local_datetime_dt"].isna().all():
-    st.error("No valid datetime available.")
-    st.stop()
-
+# TIME RANGE SLIDER
+st.markdown("### ⏱ Time Filter")
 min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
 max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
 
-start_dt = st.sidebar.slider(
-    "Time Range",
+start_dt = st.slider(
+    "Select Time Window",
     min_value=min_dt,
     max_value=max_dt,
     value=(min_dt, max_dt),
     step=pd.Timedelta(hours=3)
 )
 
-mask = (df["local_datetime_dt"] >= pd.to_datetime(start_dt[0])) & \
-       (df["local_datetime_dt"] <= pd.to_datetime(start_dt[1]))
+mask = (df["local_datetime_dt"] >= start_dt[0]) & (df["local_datetime_dt"] <= start_dt[1])
 df_sel = df.loc[mask].copy()
 
 # =====================================
-# ⚡ METRIC PANEL
+# METRICS PANEL
 # =====================================
 st.markdown("---")
 st.subheader("⚡ Tactical Weather Status")
 
 now = df_sel.iloc[0]
+
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("TEMP", f"{now.get('t','—')}°C")
-with c2: st.metric("HUMIDITY", f"{now.get('hu','—')}%")
-with c3: st.metric("WIND", f"{now.get('ws_kt',0):.1f} KT")
-with c4: st.metric("RAIN", f"{now.get('tp','—')} mm")
+with c1: st.metric("🌡 TEMP", f"{now.get('t','—')}°C")
+with c2: st.metric("💧 HUM", f"{now.get('hu','—')}%")
+with c3: st.metric("🌬 WIND", f"{now.get('ws_kt',0):.1f} KT")
+with c4: st.metric("🌧 RAIN", f"{now.get('tp','—')} mm")
 
 # =====================================
-# 📈 TREND GRAPH
+# TREND GRAPH
 # =====================================
 st.markdown("---")
 st.subheader("📊 Parameter Trends")
@@ -267,48 +259,59 @@ with c2:
     st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
 
 # =====================================
-# 🌪️ WINDROSE
+# WINDROSE
 # =====================================
 st.markdown("---")
-st.subheader("🌪️ Windrose")
+st.subheader("🌪 Windrose")
 
 if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
-    df_wr = df_sel.dropna(subset=["wd_deg", "ws_kt"])
-    if not df_wr.empty:
+    wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
+    if not wr.empty:
+
         bins_dir = np.arange(-11.25, 360, 22.5)
-        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
-        df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
+        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                      "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+
+        wr["dir_sector"] = pd.cut(wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
+
         speed_bins = [0,5,10,20,30,50,100]
         speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
-        df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
-        freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
+        wr["spd"] = pd.cut(wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
+
+        freq = wr.groupby(["dir_sector","spd"]).size().reset_index(name="count")
         freq["percent"] = freq["count"]/freq["count"].sum()*100
-        az_map = {"N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,"SSE":157.5,
-                  "S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,"WNW":292.5,"NW":315,"NNW":337.5}
-        freq["theta"] = freq["dir_sector"].map(az_map)
-        fig_wr = go.Figure()
+
+        theta = {
+            "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,"SSE":157.5,
+            "S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,"WNW":292.5,"NW":315,"NNW":337.5
+        }
+        freq["theta"] = freq["dir_sector"].map(theta)
+
+        fig = go.Figure()
         for sc in speed_labels:
-            subset = freq[freq["speed_class"]==sc]
-            fig_wr.add_trace(go.Barpolar(
-                r=subset["percent"], theta=subset["theta"], name=sc
+            sub = freq[freq["spd"] == sc]
+            fig.add_trace(go.Barpolar(
+                r=sub["percent"], theta=sub["theta"], name=f"{sc} KT", opacity=0.8
             ))
-        st.plotly_chart(fig_wr, use_container_width=True)
+
+        fig.update_layout(template="plotly_dark", title="Windrose (KT)")
+        st.plotly_chart(fig, use_container_width=True)
 
 # =====================================
-# 🗺️ MAP
+# MAP
 # =====================================
 if show_map:
     st.markdown("---")
-    st.subheader("🗺️ Tactical Map")
+    st.subheader("🗺 Tactical Map")
     try:
         lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
         lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
-        st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
-    except Exception as e:
-        st.warning(f"Map unavailable: {e}")
+        st.map(pd.DataFrame({"lat":[lat], "lon":[lon]}))
+    except:
+        st.warning("Map unavailable.")
 
 # =====================================
-# 📋 TABEL
+# TABLE
 # =====================================
 if show_table:
     st.markdown("---")
@@ -316,7 +319,7 @@ if show_table:
     st.dataframe(df_sel)
 
 # =====================================
-# 💾 EXPORT
+# EXPORT
 # =====================================
 st.markdown("---")
 st.subheader("💾 Export Data")
@@ -330,13 +333,11 @@ with c1:
 with c2:
     st.download_button("⬇️ JSON", data=json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
 
-# =====================================
-# ⚓ FOOTER
-# =====================================
+# FOOTER
 st.markdown("""
 ---
 <div style="text-align:center; color:#7a7; font-size:0.9rem;">
 Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
-Dark Stealth Tactical UI v2.0 | Streamlit + Plotly
+Stealth Tactical UI v3.0 | Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
