@@ -1,266 +1,176 @@
+# =================================================
+#    TACTICAL WEATHER OPS — BMKG STREAMLIT APP
+# =================================================
+
 import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# =====================================
-# ⚙️ KONFIGURASI DASAR
-# =====================================
+# ============================
+# ⚙️ KONFIGURASI
+# ============================
 st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
-# =====================================
-# 🎨 CSS — DARK STEALTH TACTICAL UI
-# =====================================
+API_URL = "https://cuaca.bmkg.go.id/api/forecast-weather"
+
+# ============================
+# 🎨 DARK MODE UI
+# ============================
 st.markdown("""
 <style>
-body { background-color: #0b0c0c; color: #d8decc; font-family: "Consolas", "Roboto Mono", monospace; }
-h1, h2, h3, h4 { color: #b4ff72; text-transform: uppercase; letter-spacing: 1px; }
-section[data-testid="stSidebar"] { background-color: #0e100e; padding: 25px 20px; border-right: 1px solid #1b1f1b; }
-.sidebar-title { font-size: 1.2rem; font-weight: bold; color: #b4ff72; margin-bottom: 10px; text-align: center; }
-.sidebar-label { font-size: 0.85rem; font-weight: 600; color: #9fb99a; margin-bottom: -6px; }
-.stCheckbox label { color: #d0d6c4 !important; font-size: 0.9rem !important; }
-.stButton>button { background-color: #1a2a1e; color: #b4ff72; border: 1px solid #3e513d; border-radius: 6px; font-weight: 700; width: 100%; padding: 8px 0px; }
-.stButton>button:hover { background-color: #233726; border-color: #b4ff72; color: #e3ffcd; }
-.radar { position: relative; width: 170px; height: 170px; border-radius: 50%; background: radial-gradient(circle, rgba(20,255,50,0.06) 20%, transparent 21%), radial-gradient(circle, rgba(20,255,50,0.10) 10%, transparent 11%); background-size: 20px 20px; border: 2px solid #41ff6c; overflow: hidden; margin: auto; box-shadow: 0 0 20px #39ff61; }
-.radar:before { content: ""; position: absolute; top: 0; left: 0; width: 60%; height: 2px; background: linear-gradient(90deg, #3dff6f, transparent); transform-origin: 100% 50%; animation: sweep 2.5s linear infinite; }
-@keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.divider { margin: 18px 0px; border-top: 1px solid #222822; }
-.weather-icon { width: 60px; height: 60px; margin: auto; }
-.weather-label { text-align: center; color: #7aff9b; font-size: 0.95rem; font-weight: 600; }
+body { background-color: #0e1117; color: #e5e5e5; }
+.block-container { padding-top: 1rem; }
+h1,h2,h3,h4 { color: #f1f1f1; }
 </style>
 """, unsafe_allow_html=True)
 
-# =====================================
-# 📡 API
-# =====================================
-API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384  
-
-# =====================================
-# UTIL
-# =====================================
-@st.cache_data(ttl=300)
-def fetch_forecast(adm1: str):
-    params = {"adm1": adm1}
-    resp = requests.get(API_BASE, params=params, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-def flatten_cuaca_entry(entry):
-    """
-    Flatten ALL BMKG weather parameters available.
-    """
-    rows = []
-    lokasi = entry.get("lokasi", {})
-
-    for group in entry.get("cuaca", []):
-        for obs in group:
-            r = obs.copy()
-
-            # Tambahkan lokasi
-            r.update({
-                "adm1": lokasi.get("adm1"),
-                "adm2": lokasi.get("adm2"),
-                "provinsi": lokasi.get("provinsi"),
-                "kotkab": lokasi.get("kotkab"),
-                "lon": lokasi.get("lon"),
-                "lat": lokasi.get("lat"),
-            })
-
-            # Parse datetime
-            try:
-                r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"))
-                r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"))
-            except:
-                r["utc_datetime_dt"], r["local_datetime_dt"] = pd.NaT, pd.NaT
-
-            rows.append(r)
-
-    df = pd.DataFrame(rows)
-
-    # Konversi kolom numerik
-    num_cols = ["t","tcc","tp","wd_deg","ws","hu","vs","pres","lightning_prob"]
-    for c in num_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    return df
-
-# =====================================
-# 🎚️ SIDEBAR
-# =====================================
-with st.sidebar:
-    st.markdown("<div class='sidebar-title'>TACTICAL CONTROLS</div>", unsafe_allow_html=True)
-    st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#7aff9b;'>System Online — Scanning</p>", unsafe_allow_html=True)
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-
-    adm1 = st.text_input("Province Code (ADM1)", value="32")
-    refresh = st.button("🔄 Fetch Data")
-
-    show_map = st.checkbox("Show Map", value=True)
-    show_table = st.checkbox("Show Table", value=False)
-
-# =====================================
-# 📡 AMBIL DATA
-# =====================================
-st.title("Tactical Weather Operations Dashboard")
-st.markdown("*Live Weather Intelligence — BMKG Forecast API*")
-
-with st.spinner("🛰️ Acquiring weather intelligence..."):
+# ============================
+# 🔧 Fungsi Panggil API
+# ============================
+@st.cache_data(ttl=900)
+def fetch_weather(adm_code):
     try:
-        raw = fetch_forecast(adm1)
-    except Exception as e:
-        st.error(f"Failed to fetch data: {e}")
+        r = requests.get(f"{API_URL}?adm={adm_code}", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return pd.json_normalize(data["data"])
+    except Exception:
+        st.error("❌ Gagal menghubungi API BMKG. Periksa ADM Code.")
         st.stop()
 
-entries = raw.get("data", [])
-if not entries:
-    st.warning("No forecast data available.")
+# ============================
+# 🚀 SIDEBAR
+# ============================
+st.sidebar.header("Tactical Weather Options")
+adm = st.sidebar.text_input("Kode ADM BMKG:", "1701")
+st.sidebar.info("Contoh: 1701 (Pekanbaru), 3173 (Jakarta), dsb.")
+
+# ============================
+# 🚀 LOAD DATA
+# ============================
+df = fetch_weather(adm)
+
+# ============================
+# 🛠️ PREPROCESSING AMAN
+# ============================
+
+# DateTime
+if "local_datetime" in df.columns:
+    df["local_datetime_dt"] = pd.to_datetime(df["local_datetime"], errors="coerce")
+else:
+    df["local_datetime_dt"] = pd.NaT
+
+# Convert parameter ke numeric
+numeric_cols = ["t", "hu", "ws", "wd", "pres", "vis"]
+for col in numeric_cols:
+    if col in df:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+# Bersihkan NaN
+df_sel = df.dropna(subset=["local_datetime_dt"])
+
+if df_sel.empty:
+    st.warning("⚠️ Data kosong setelah diproses. Tidak ada grafik yang bisa ditampilkan.")
     st.stop()
 
-# Mapping lokasi
-mapping = {}
-for e in entries:
-    lok = e.get("lokasi", {})
-    label = lok.get("kotkab") or lok.get("adm2") or f"Location {len(mapping)+1}"
-    mapping[label] = {"entry": e}
+# ============================
+# 🛰️ HEADER
+# ============================
+st.title("🌦️ Tactical Weather Ops — BMKG")
+st.caption("Operasional cuaca dengan fokus Pressure, Visibility, dan Tactical Alerts")
 
-col1, col2 = st.columns([2, 1])
+st.markdown("---")
+
+# ============================
+# 📊 GRAFIK UTAMA
+# ============================
+
+col1, col2 = st.columns(2)
+
+# Temperature
 with col1:
-    loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
+    if "t" in df_sel:
+        fig = px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature (°C)")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Kolom suhu (t) tidak tersedia.")
+
+# Humidity
 with col2:
-    st.metric("📍 Locations", len(mapping))
+    if "hu" in df_sel:
+        fig = px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity (%)")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Kolom humidity (hu) tidak tersedia.")
 
-selected_entry = mapping[loc_choice]["entry"]
-df = flatten_cuaca_entry(selected_entry)
-df["ws_kt"] = df["ws"] * MS_TO_KT
-df = df.sort_values("utc_datetime_dt")
+# Row 2
+col3, col4 = st.columns(2)
 
-# Waktu
-min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
-max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
+# Pressure
+with col3:
+    if "pres" in df_sel:
+        fig = px.line(df_sel, x="local_datetime_dt", y="pres", title="Pressure (hPa)")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Kolom tekanan (pres) tidak ada.")
 
-start_dt = st.sidebar.slider(
-    "Time Range",
-    min_value=min_dt,
-    max_value=max_dt,
-    value=(min_dt, max_dt),
-    step=pd.Timedelta(hours=3)
-)
+# Visibility
+with col4:
+    if "vis" in df_sel:
+        fig = px.line(df_sel, x="local_datetime_dt", y="vis", title="Visibility (m)")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Kolom visibility (vis) tidak ada.")
 
-mask = (df["local_datetime_dt"] >= pd.to_datetime(start_dt[0])) & \
-       (df["local_datetime_dt"] <= pd.to_datetime(start_dt[1]))
-df_sel = df.loc[mask].copy()
+# Row 3 — Wind
+st.subheader("💨 Wind Analysis")
+col5, col6 = st.columns(2)
 
-# =====================================
-# ⚡ METRIC PANEL + PARAMETER LENGKAP
-# =====================================
+with col5:
+    if "ws" in df_sel:
+        fig = px.line(df_sel, x="local_datetime_dt", y="ws", title="Wind Speed (kt)")
+        st.plotly_chart(fig, use_container_width=True)
+
+with col6:
+    if "wd" in df_sel:
+        fig = px.line(df_sel, x="local_datetime_dt", y="wd", title="Wind Direction (°)")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ============================
+# ⚠️ TACTICAL ALERT SYSTEM
+# ============================
 st.markdown("---")
-st.subheader("⚡ Tactical Weather Status")
+st.subheader("⚠️ Tactical Weather Alerts")
 
-now = df_sel.iloc[0]
+alerts = []
 
-c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-with c1:
-    st.metric("TEMP", f"{now.get('t','—')}°C")
-with c2:
-    st.metric("HUMIDITY", f"{now.get('hu','—')}%")
-with c3:
-    st.metric("WIND", f"{now.get('ws_kt',0):.1f} KT")
-with c4:
-    st.metric("RAIN", f"{now.get('tp','—')} mm")
-with c5:
-    st.metric("CLOUD", f"{now.get('tcc','—')}")
-with c6:
-    st.metric("PRESS", f"{now.get('pres','—')} hPa")
-with c7:
-    st.metric("VISIBILITY", f"{now.get('vs','—')} km")
+# --- THRESHOLDS ---
+if "ws" in df_sel and df_sel["ws"].max() > 25:
+    alerts.append("💨 **Angin kencang (>25 kt)** — Risiko tinggi untuk operasi udara/laut.")
 
-# =====================================
-# 📈 TREND GRAPH — PARAMETER LENGKAP
-# =====================================
+if "pres" in df_sel and df_sel["pres"].min() < 1008:
+    alerts.append("🌀 **Tekanan rendah (<1008 hPa)** — Potensi cuaca buruk / sistem siklonik.")
+
+if "vis" in df_sel and df_sel["vis"].min() < 3000:
+    alerts.append("🌫️ **Visibility rendah (<3000 m)** — Risiko navigasi dan penerbangan.")
+
+if "hu" in df_sel and df_sel["hu"].max() > 95:
+    alerts.append("💧 **Kelembaban sangat tinggi (>95%)** — Potensi hujan intens.")
+
+if len(alerts) == 0:
+    st.success("✔ Tidak ada peringatan — kondisi aman.")
+else:
+    for a in alerts:
+        st.error(a)
+
+# ============================
+# 📄 TABEL RAW DATA
+# ============================
 st.markdown("---")
-st.subheader("📊 Parameter Trends")
+st.subheader("📄 Raw Forecast Data")
+st.dataframe(df_sel, use_container_width=True)
 
-c1, c2 = st.columns(2)
-with c1:
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="pres", title="Pressure (hPa)"), use_container_width=True)
-with c2:
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind Speed (KT)"), use_container_width=True)
-    st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="vs", title="Visibility (km)"), use_container_width=True)
-
-# =====================================
-# 🌪️ WINDROSE
-# =====================================
-st.markdown("---")
-st.subheader("🌪️ Windrose")
-if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
-    df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
-    if not df_wr.empty:
-        bins_dir = np.arange(-11.25,360,22.5)
-        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
-        df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
-        speed_bins = [0,5,10,20,30,50,100]
-        speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
-        df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
-        freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
-        freq["percent"] = freq["count"]/freq["count"].sum()*100
-        az_map = {k:i*22.5 for i,k in enumerate(labels_dir)}
-        freq["theta"] = freq["dir_sector"].map(az_map)
-        fig_wr = go.Figure()
-        for sc in speed_labels:
-            subset = freq[freq["speed_class"]==sc]
-            fig_wr.add_trace(go.Barpolar(r=subset["percent"], theta=subset["theta"], name=sc))
-        st.plotly_chart(fig_wr, use_container_width=True)
-
-# =====================================
-# 🗺️ MAP
-# =====================================
-if show_map:
-    st.markdown("---")
-    st.subheader("🗺️ Tactical Map")
-    try:
-        lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
-        lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
-        st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
-    except Exception as e:
-        st.warning(f"Map unavailable: {e}")
-
-# =====================================
-# 📋 TABEL
-# =====================================
-if show_table:
-    st.markdown("---")
-    st.subheader("📋 Forecast Table")
-    st.dataframe(df_sel)
-
-# =====================================
-# 💾 EXPORT
-# =====================================
-st.markdown("---")
-st.subheader("💾 Export Data")
-csv = df_sel.to_csv(index=False)
-json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
-c1, c2 = st.columns(2)
-with c1:
-    st.download_button("⬇️ CSV", data=csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
-with c2:
-    st.download_button("⬇️ JSON", data=json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
-
-# =====================================
-# ⚓ FOOTER
-# =====================================
-st.markdown("""
----
-<div style="text-align:center; color:#7a7; font-size:0.9rem;">
-Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
-Dark Stealth Tactical UI v2.0 | Streamlit + Plotly
-</div>
-""", unsafe_allow_html=True)
