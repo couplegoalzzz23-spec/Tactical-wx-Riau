@@ -7,33 +7,28 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # =====================================
-# ⚙ KONFIGURASI DASAR
+# ⚙️ KONFIGURASI DASAR
 # =====================================
 st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
-# 🌑 CSS — MILITARY STYLE + RADAR ANIMATION
+# 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL
 st.markdown("""
 <style>
+/* Base theme */
 body {
     background-color: #0b0c0c;
     color: #cfd2c3;
     font-family: "Consolas", "Roboto Mono", monospace;
 }
-
-/* --- Judul dan warna aksen --- */
 h1, h2, h3, h4 {
     color: #a9df52;
     text-transform: uppercase;
     letter-spacing: 1px;
 }
-
-/* --- Sidebar --- */
 section[data-testid="stSidebar"] {
     background-color: #111;
     color: #d0d3ca;
 }
-
-/* --- Tombol --- */
 .stButton>button {
     background-color: #1a2a1f;
     color: #a9df52;
@@ -45,13 +40,9 @@ section[data-testid="stSidebar"] {
     background-color: #2b3b2b;
     border-color: #a9df52;
 }
-
-/* --- Metric hijau --- */
 div[data-testid="stMetricValue"] {
     color: #a9df52 !important;
 }
-
-/* --- Radar animation --- */
 .radar {
   position: relative;
   width: 160px;
@@ -78,13 +69,11 @@ div[data-testid="stMetricValue"] {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-
-/* --- Footer --- */
 hr, .stDivider {
     border-top: 1px solid #2f3a2f;
 }
 
-/* Tactical card styling */
+/* Tactical card (kept for compatibility) */
 .tacti-card {
     padding: 18px 22px;
     background-color: #111;
@@ -100,12 +89,39 @@ hr, .stDivider {
     text-transform: uppercase;
     letter-spacing: 1px;
 }
-.tacti-sub {
-    font-size: 1.1rem;
-    color: #8fd685;
-    font-weight: bold;
-    margin-top: 18px;
-    margin-bottom: 12px;
+
+/* Flight-style panel */
+.flight-card {
+    padding: 20px 24px;
+    background-color: #0f1111;
+    border: 1px solid #2b3c2b;
+    border-radius: 10px;
+    margin-bottom: 22px;
+}
+.flight-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #9adf4f;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+}
+.metric-label {
+    font-size: 0.70rem;
+    text-transform: uppercase;
+    color: #9fa8a0;
+    letter-spacing: 0.6px;
+    margin-bottom: -6px;
+}
+.metric-value {
+    font-size: 1.9rem;
+    color: #b6ff6d;
+    margin-top: -6px;
+    font-weight: 700;
+}
+.small-note {
+    font-size: 0.78rem;
+    color: #9fa8a0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -114,7 +130,7 @@ hr, .stDivider {
 # 📡 KONFIGURASI API
 # =====================================
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384
+MS_TO_KT = 1.94384  # konversi ke knot
 
 # =====================================
 # 🧰 UTILITAS
@@ -140,14 +156,12 @@ def flatten_cuaca_entry(entry):
                 "lon": lokasi.get("lon"),
                 "lat": lokasi.get("lat"),
             })
-            try:
-                r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"))
-                r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"))
-            except Exception:
-                r["utc_datetime_dt"], r["local_datetime_dt"] = pd.NaT, pd.NaT
+            # safe datetime parse
+            r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
+            r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
             rows.append(r)
     df = pd.DataFrame(rows)
-    for c in ["t","tcc","tp","wd_deg","ws","hu","vs"]:
+    for c in ["t","tcc","tp","wd_deg","ws","hu","vs","ws_kt"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -160,25 +174,21 @@ with st.sidebar:
     adm1 = st.text_input("Province Code (ADM1)", value="32")
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
-    refresh = st.button("🔄 Fetch Data")
+    st.button("🔄 Fetch Data")
     st.markdown("---")
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
     st.markdown("---")
-    st.caption("Data Source: BMKG API\nTheme: Military Ops v1.0")
+    st.caption("Data Source: BMKG API · Military Ops v1.0")
 
 # =====================================
-# 📡 PENGAMBILAN DATA
+# 📡 LOAD DATA
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
 st.markdown("*Source: BMKG Forecast API — Live Data*")
 
 with st.spinner("🛰️ Acquiring weather intelligence..."):
-    try:
-        raw = fetch_forecast(adm1)
-    except Exception as e:
-        st.error(f"Failed to fetch data: {e}")
-        st.stop()
+    raw = fetch_forecast(adm1)
 
 entries = raw.get("data", [])
 if not entries:
@@ -191,7 +201,7 @@ for e in entries:
     label = lok.get("kotkab") or lok.get("adm2") or f"Location {len(mapping)+1}"
     mapping[label] = {"entry": e}
 
-col1, col2 = st.columns([2,1])
+col1, col2 = st.columns([2, 1])
 with col1:
     loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
 with col2:
@@ -203,124 +213,171 @@ if df.empty:
     st.warning("No valid weather data found.")
     st.stop()
 
-df["ws_kt"] = df["ws"] * MS_TO_KT
+# compute ws_kt if not already present
+if "ws_kt" not in df.columns:
+    df["ws_kt"] = df["ws"] * MS_TO_KT
+else:
+    df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
 
 # =====================================
 # 🕓 SLIDER WAKTU
 # =====================================
-df = df.sort_values("utc_datetime_dt")
-if df["local_datetime_dt"].isna().all():
-    st.error("No valid datetime available.")
+# ensure sort by local time if available, otherwise UTC
+if "local_datetime_dt" in df.columns and df["local_datetime_dt"].notna().any():
+    df = df.sort_values("local_datetime_dt")
+elif "utc_datetime_dt" in df.columns and df["utc_datetime_dt"].notna().any():
+    df = df.sort_values("utc_datetime_dt")
+else:
+    df = df.sort_index()
+
+# check datetimes exist
+if "local_datetime_dt" not in df.columns or df["local_datetime_dt"].isna().all():
+    # fallback to utc or index
+    if "utc_datetime_dt" in df.columns and df["utc_datetime_dt"].notna().any():
+        min_dt = df["utc_datetime_dt"].dropna().min().to_pydatetime()
+        max_dt = df["utc_datetime_dt"].dropna().max().to_pydatetime()
+        use_col = "utc_datetime_dt"
+    else:
+        # no datetimes: use index
+        min_dt = 0
+        max_dt = len(df)-1
+        use_col = None
+else:
+    min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
+    max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
+    use_col = "local_datetime_dt"
+
+# slider only when datetime exists
+if use_col:
+    start_dt = st.sidebar.slider(
+        "Time Range",
+        min_value=min_dt,
+        max_value=max_dt,
+        value=(min_dt, max_dt),
+        step=pd.Timedelta(hours=3)
+    )
+    mask = (df[use_col] >= pd.to_datetime(start_dt[0])) & (df[use_col] <= pd.to_datetime(start_dt[1]))
+    df_sel = df.loc[mask].copy()
+else:
+    # select all
+    df_sel = df.copy()
+
+if df_sel.empty:
+    st.warning("No data in selected time range.")
     st.stop()
 
-min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
-max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
-
-start_dt = st.sidebar.slider(
-    "Time Range (Local)",
-    min_value=min_dt,
-    max_value=max_dt,
-    value=(min_dt, max_dt),
-    step=pd.Timedelta(hours=3)
-)
-
-mask = (
-    (df["local_datetime_dt"] >= pd.to_datetime(start_dt[0])) &
-    (df["local_datetime_dt"] <= pd.to_datetime(start_dt[1]))
-)
-df_sel = df.loc[mask].copy()
-
-
 # =====================================
-# ⚡ TACTICAL WEATHER STATUS (RAPIH)
+# ✈ FLIGHT WEATHER STATUS (PROFESSIONAL)
 # =====================================
 st.markdown("---")
-st.markdown('<div class="tacti-card">', unsafe_allow_html=True)
-st.markdown('<div class="tacti-title">⚡ Tactical Weather Status</div>', unsafe_allow_html=True)
+st.markdown('<div class="flight-card">', unsafe_allow_html=True)
+st.markdown('<div class="flight-title">✈ Flight Weather Status</div>', unsafe_allow_html=True)
 
 now = df_sel.iloc[0]
 
-c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("🔥 TEMP (°C)", now.get("t", "—"))
-with c2: st.metric("💧 HUMIDITY (%)", now.get("hu", "—"))
-with c3: st.metric("🌬️ WIND (KT)", f"{now.get('ws_kt',0):.1f}")
-with c4: st.metric("🌧️ RAIN (mm)", now.get("tp", "—"))
+colA, colB, colC, colD = st.columns(4)
+
+with colA:
+    st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
+
+with colB:
+    st.markdown("<div class='metric-label'>Relative Humidity (%)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('hu','—')}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='small-note'>RH</div>", unsafe_allow_html=True)
+
+with colC:
+    st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='small-note'>Sustained</div>", unsafe_allow_html=True)
+
+with colD:
+    st.markdown("<div class='metric-label'>Rainfall (mm)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('tp','—')}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='small-note'>Accum.</div>", unsafe_allow_html=True)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =====================================
-# 🔍 ADDITIONAL WEATHER PARAMETERS (RAPIH)
+# ☁ METEOROLOGICAL DETAILS (SECONDARY)
 # =====================================
-st.markdown('<div class="tacti-card">', unsafe_allow_html=True)
-st.markdown('<div class="tacti-title">🔍 Additional Weather Parameters</div>', unsafe_allow_html=True)
+st.markdown('<div class="flight-card">', unsafe_allow_html=True)
+st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
 
-# Group 1
-c5, c6, c7, c8 = st.columns(4)
-with c5: st.metric("☁️ CLOUD COVER (%)", now.get("tcc", "—"))
-with c6: st.metric("🧭 WIND DIR (°)", now.get("wd_deg", "—"))
-with c7: st.metric("🧭 WIND DIR", now.get("wd", "—"))
-with c8: st.metric("👁️ VISIBILITY (m)", now.get("vs", "—"))
+row1, row2, row3, row4 = st.columns(4)
+with row1:
+    st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('tcc','—')}</div>", unsafe_allow_html=True)
+with row2:
+    st.markdown("<div class='metric-label'>Wind Direction (°)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('wd_deg','—')}</div>", unsafe_allow_html=True)
+with row3:
+    st.markdown("<div class='metric-label'>Wind Dir Code</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('wd','—')}</div>", unsafe_allow_html=True)
+with row4:
+    st.markdown("<div class='metric-label'>Visibility (m)</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
 
-# Group 2
-c9, c10, c11 = st.columns(3)
-with c9: st.metric("🌦️ WEATHER CODE", now.get("weather", "—"))
-with c10: st.metric("📜 DESCRIPTION", now.get("weather_desc", "—"))
-with c11: st.metric("👁️ VIS DESC", now.get("vs_text", "—"))
+row5, row6, row7, row8 = st.columns(4)
+with row5:
+    st.markdown("<div class='metric-label'>Weather Code</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('weather','—')}</div>", unsafe_allow_html=True)
+with row6:
+    st.markdown("<div class='metric-label'>Description</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
+with row7:
+    st.markdown("<div class='metric-label'>Visibility Desc</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
+with row8:
+    st.markdown("<div class='metric-label'>Time Index</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('time_index','—')}</div>", unsafe_allow_html=True)
 
-# Group 3
-c12, c13, c14 = st.columns(3)
-with c12: st.metric("🕒 TIME INDEX", now.get("time_index", "—"))
-with c13: st.metric("🕓 LOCAL TIME", now.get("local_datetime", "—"))
-with c14: st.metric("📅 ANALYSIS", now.get("analysis_date", "—"))
-
-# Group 4
-c15, c16, c17, c18 = st.columns(4)
-with c15: st.metric("📍 PROVINCE", now.get("provinsi", "—"))
-with c16: st.metric("🏙️ CITY", now.get("kotkab", "—"))
-with c17: st.metric("🗺️ LAT", now.get("lat", "—"))
-with c18: st.metric("🗺️ LON", now.get("lon", "—"))
+row9, row10, row11, row12 = st.columns(4)
+with row9:
+    st.markdown("<div class='metric-label'>Local Time</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('local_datetime','—')}</div>", unsafe_allow_html=True)
+with row10:
+    st.markdown("<div class='metric-label'>Analysis Time</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('analysis_date','—')}</div>", unsafe_allow_html=True)
+with row11:
+    st.markdown("<div class='metric-label'>Province</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
+with row12:
+    st.markdown("<div class='metric-label'>City</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('kotkab','—')}</div>", unsafe_allow_html=True)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =====================================
-# 📈 TREND GRAFIK
+# 📈 TRENDS
 # =====================================
 st.markdown("---")
 st.subheader("📊 Parameter Trends")
 
 c1, c2 = st.columns(2)
 with c1:
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t",
-        title="Temperature (°C)", markers=True,
-        color_discrete_sequence=["#a9df52"]), use_container_width=True)
-
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu",
-        title="Humidity (%)", markers=True,
-        color_discrete_sequence=["#00ffbf"]), use_container_width=True)
-
+    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
+    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
 with c2:
-    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt",
-        title="Wind Speed (KT)", markers=True,
-        color_discrete_sequence=["#00ffbf"]), use_container_width=True)
-
-    st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp",
-        title="Rainfall (mm)",
-        color_discrete_sequence=["#ffbf00"]), use_container_width=True)
+    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind (KT)"), use_container_width=True)
+    st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
 
 
 # =====================================
-# 🌪️ WINDROSE (VERSI ASLI - TIDAK DIUBAH)
+# 🌪️ WINDROSE (ASLI)
 # =====================================
 st.markdown("---")
 st.subheader("🌪️ Windrose — Direction & Speed")
 
 if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
-    df_wr = df_sel.dropna(subset=["wd_deg", "ws_kt"])
+    df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
     if not df_wr.empty:
         bins_dir = np.arange(-11.25,360,22.5)
-        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
+        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                      "S","SSW","SW","WSW","W","WNW","NW","NNW"]
         df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
 
         speed_bins = [0,5,10,20,30,50,100]
@@ -330,9 +387,12 @@ if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
         freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
         freq["percent"] = freq["count"]/freq["count"].sum()*100
 
-        az_map = {"N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
-                  "SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,
-                  "W":270,"WNW":292.5,"NW":315,"NNW":337.5}
+        az_map = {
+            "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
+            "SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,
+            "WNW":292.5,"NW":315,"NNW":337.5
+        }
+
         freq["theta"] = freq["dir_sector"].map(az_map)
 
         colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
@@ -348,8 +408,7 @@ if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
         fig_wr.update_layout(
             title="Windrose (KT)",
             polar=dict(
-                angularaxis=dict(direction="clockwise", rotation=90,
-                                 tickvals=list(range(0,360,45))),
+                angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))),
                 radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")
             ),
             legend_title="Wind Speed Class",
@@ -360,12 +419,11 @@ if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
 
 
 # =====================================
-# 🗺️ PETA
+# 🗺️ MAP
 # =====================================
 if show_map:
     st.markdown("---")
     st.subheader("🗺️ Tactical Map")
-
     try:
         lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
         lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
@@ -375,7 +433,7 @@ if show_map:
 
 
 # =====================================
-# 📋 TABEL
+# 📋 TABLE
 # =====================================
 if show_table:
     st.markdown("---")
@@ -384,7 +442,7 @@ if show_table:
 
 
 # =====================================
-# 💾 EKSPOR
+# 💾 EXPORT
 # =====================================
 st.markdown("---")
 st.subheader("💾 Export Data")
@@ -392,14 +450,11 @@ st.subheader("💾 Export Data")
 csv = df_sel.to_csv(index=False)
 json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
 
-c1, c2 = st.columns(2)
-with c1:
-    st.download_button("⬇️ Download CSV", data=csv,
-        file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
-
-with c2:
-    st.download_button("⬇️ Download JSON", data=json_text,
-        file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
+colA, colB = st.columns(2)
+with colA:
+    st.download_button("⬇ CSV", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
+with colB:
+    st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
 
 
 # =====================================
@@ -409,6 +464,6 @@ st.markdown("""
 ---
 <div style="text-align:center; color:#7a7; font-size:0.9rem;">
 Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
-Designed with Military Precision | Powered by Streamlit + Plotly
+Military Ops UI · Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
