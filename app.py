@@ -12,15 +12,11 @@ from datetime import datetime
 st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =====================================
-# 🎨 CSS — DARK STEALTH TACTICAL UI (FINAL + ICON WEATHER)
+# 🎨 CSS — DARK STEALTH TACTICAL UI
 # =====================================
 st.markdown("""
 <style>
-body {
-    background-color: #0b0c0c;
-    color: #d8decc;
-    font-family: "Consolas", "Roboto Mono", monospace;
-}
+body { background-color: #0b0c0c; color: #d8decc; font-family: "Consolas", "Roboto Mono", monospace; }
 h1, h2, h3, h4 { color: #b4ff72; text-transform: uppercase; letter-spacing: 1px; }
 section[data-testid="stSidebar"] { background-color: #0e100e; padding: 25px 20px; border-right: 1px solid #1b1f1b; }
 .sidebar-title { font-size: 1.2rem; font-weight: bold; color: #b4ff72; margin-bottom: 10px; text-align: center; }
@@ -32,19 +28,8 @@ section[data-testid="stSidebar"] { background-color: #0e100e; padding: 25px 20px
 .radar:before { content: ""; position: absolute; top: 0; left: 0; width: 60%; height: 2px; background: linear-gradient(90deg, #3dff6f, transparent); transform-origin: 100% 50%; animation: sweep 2.5s linear infinite; }
 @keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .divider { margin: 18px 0px; border-top: 1px solid #222822; }
-
-/* WEATHER ICON SVG */
-.weather-icon {
-    width: 60px;
-    height: 60px;
-    margin: auto;
-}
-.weather-label {
-    text-align: center;
-    color: #7aff9b;
-    font-size: 0.95rem;
-    font-weight: 600;
-}
+.weather-icon { width: 60px; height: 60px; margin: auto; }
+.weather-label { text-align: center; color: #7aff9b; font-size: 0.95rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -65,11 +50,17 @@ def fetch_forecast(adm1: str):
     return resp.json()
 
 def flatten_cuaca_entry(entry):
+    """
+    Flatten ALL BMKG weather parameters available.
+    """
     rows = []
     lokasi = entry.get("lokasi", {})
+
     for group in entry.get("cuaca", []):
         for obs in group:
             r = obs.copy()
+
+            # Tambahkan lokasi
             r.update({
                 "adm1": lokasi.get("adm1"),
                 "adm2": lokasi.get("adm2"),
@@ -78,38 +69,43 @@ def flatten_cuaca_entry(entry):
                 "lon": lokasi.get("lon"),
                 "lat": lokasi.get("lat"),
             })
+
+            # Parse datetime
             try:
                 r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"))
                 r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"))
             except:
                 r["utc_datetime_dt"], r["local_datetime_dt"] = pd.NaT, pd.NaT
+
             rows.append(r)
+
     df = pd.DataFrame(rows)
-    for c in ["t","tcc","tp","wd_deg","ws","hu","vs"]:
+
+    # Konversi kolom numerik
+    num_cols = ["t","tcc","tp","wd_deg","ws","hu","vs","pres","lightning_prob"]
+    for c in num_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
+
     return df
 
 # =====================================
-# 🎚️ SIDEBAR — STEALTH UI
+# 🎚️ SIDEBAR
 # =====================================
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>TACTICAL CONTROLS</div>", unsafe_allow_html=True)
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#7aff9b;'>System Online — Scanning</p>", unsafe_allow_html=True)
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='sidebar-label'>Province Code (ADM1)</div>", unsafe_allow_html=True)
-    adm1 = st.text_input("", value="32")
+
+    adm1 = st.text_input("Province Code (ADM1)", value="32")
     refresh = st.button("🔄 Fetch Data")
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='sidebar-label'>Display Options</div>", unsafe_allow_html=True)
+
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-    st.caption("BMKG API | Tactical Ops UI v2.0")
 
 # =====================================
-# 📡 PENGAMBILAN DATA
+# 📡 AMBIL DATA
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
 st.markdown("*Live Weather Intelligence — BMKG Forecast API*")
@@ -126,6 +122,7 @@ if not entries:
     st.warning("No forecast data available.")
     st.stop()
 
+# Mapping lokasi
 mapping = {}
 for e in entries:
     lok = e.get("lokasi", {})
@@ -140,17 +137,10 @@ with col2:
 
 selected_entry = mapping[loc_choice]["entry"]
 df = flatten_cuaca_entry(selected_entry)
-if df.empty:
-    st.warning("No valid weather data found.")
-    st.stop()
-
 df["ws_kt"] = df["ws"] * MS_TO_KT
 df = df.sort_values("utc_datetime_dt")
 
-if df["local_datetime_dt"].isna().all():
-    st.error("No valid datetime available.")
-    st.stop()
-
+# Waktu
 min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
 max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
 
@@ -167,51 +157,44 @@ mask = (df["local_datetime_dt"] >= pd.to_datetime(start_dt[0])) & \
 df_sel = df.loc[mask].copy()
 
 # =====================================
-# ⚡ METRIC PANEL + WEATHER ICON
+# ⚡ METRIC PANEL + PARAMETER LENGKAP
 # =====================================
 st.markdown("---")
 st.subheader("⚡ Tactical Weather Status")
 
-def weather_svg(row):
-    """
-    Return inline SVG icon based on weather condition.
-    """
-    tcc = row.get("tcc",0)
-    tp = row.get("tp",0)
-    if tp > 10:
-        return """<svg class="weather-icon" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#ffec00"/><polygon points="32,16 28,32 36,32" fill="#ff3300"/></svg>"""  # thunderstorm
-    elif tp > 0:
-        return """<svg class="weather-icon" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#00aaff"/><ellipse cx="32" cy="32" rx="20" ry="12" fill="#fff"/></svg>"""  # rain
-    elif tcc >= 0.75:
-        return """<svg class="weather-icon" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#aaaaaa"/></svg>"""  # cloudy
-    elif tcc >= 0.4:
-        return """<svg class="weather-icon" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#ffd966"/></svg>"""  # partly cloudy
-    else:
-        return """<svg class="weather-icon" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#ffec00"/></svg>"""  # sunny
-
 now = df_sel.iloc[0]
-svg_icon = weather_svg(now)
 
-c1, c2, c3, c4, c5 = st.columns([1,1,1,1,1])
+c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
 with c1:
-    st.markdown(svg_icon + "<div class='weather-label'>Weather</div>", unsafe_allow_html=True)
-with c2: st.metric("TEMP", f"{now.get('t','—')}°C")
-with c3: st.metric("HUMIDITY", f"{now.get('hu','—')}%")
-with c4: st.metric("WIND", f"{now.get('ws_kt',0):.1f} KT")
-with c5: st.metric("RAIN", f"{now.get('tp','—')} mm")
+    st.metric("TEMP", f"{now.get('t','—')}°C")
+with c2:
+    st.metric("HUMIDITY", f"{now.get('hu','—')}%")
+with c3:
+    st.metric("WIND", f"{now.get('ws_kt',0):.1f} KT")
+with c4:
+    st.metric("RAIN", f"{now.get('tp','—')} mm")
+with c5:
+    st.metric("CLOUD", f"{now.get('tcc','—')}")
+with c6:
+    st.metric("PRESS", f"{now.get('pres','—')} hPa")
+with c7:
+    st.metric("VISIBILITY", f"{now.get('vs','—')} km")
 
 # =====================================
-# 📈 TREND GRAPH
+# 📈 TREND GRAPH — PARAMETER LENGKAP
 # =====================================
 st.markdown("---")
 st.subheader("📊 Parameter Trends")
+
 c1, c2 = st.columns(2)
 with c1:
     st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
     st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
+    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="pres", title="Pressure (hPa)"), use_container_width=True)
 with c2:
     st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind Speed (KT)"), use_container_width=True)
     st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
+    st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="vs", title="Visibility (km)"), use_container_width=True)
 
 # =====================================
 # 🌪️ WINDROSE
