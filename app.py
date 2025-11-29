@@ -14,8 +14,8 @@ st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 # =====================================
 # 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL + MET REPORT TABLE
 # =====================================
-# Tambahkan <style> block ke variabel untuk dimasukkan dalam file HTML yang diunduh.
-# Ini memastikan laporan yang diunduh memiliki styling yang sama.
+
+# Menyimpan CSS styling untuk digunakan dalam file HTML QAM yang diunduh
 CSS_STYLES = """
 <style>
 /* Base theme */
@@ -24,7 +24,7 @@ body {
     color: #cfd2c3;
     font-family: "Consolas", "Roboto Mono", monospace;
 }
-/* Hanya masukkan CSS yang relevan untuk laporan QAM */
+/* Custom CSS for the MET REPORT TABLE (REVISED QAM FORMAT) */
 .met-report-table {
     border: 1px solid #2b3c2b;
     width: 100%;
@@ -69,33 +69,102 @@ body {
     font-size: 0.8rem;
     padding-bottom: 5px;
 }
-/* Menambahkan gaya untuk cetak, agar background tetap hitam/gelap saat dicetak */
+/* Print styles untuk memastikan warna tetap muncul saat cetak ke PDF */
 @media print {
     body {
         -webkit-print-color-adjust: exact;
         color-adjust: exact;
     }
-    .met-report-table {
-        border-color: #777 !important;
-    }
-    .met-report-table th, .met-report-table td {
-        border-color: #777 !important;
-    }
-    /* Sembunyikan semua elemen lain kecuali laporan QAM saat mencetak (opsional) */
-    /* * { display: none !important; } .met-report-container { display: block !important; } */
 }
 </style>
 """
 
-# Menyuntikkan seluruh CSS (termasuk yang tidak relevan untuk QAM, untuk tampilan Streamlit)
+# Menyuntikkan seluruh CSS ke Streamlit (termasuk yang tidak relevan untuk QAM, untuk tampilan dashboard)
 st.markdown(CSS_STYLES + """
 <style>
-/* Streamlit Specific Styles (Dilewatkan untuk file QAM) */
-h1, h2, h3, h4 { color: #a9df52; text-transform: uppercase; letter-spacing: 1px; }
-/* ... (CSS Streamlit lainnya) ... */
-.radar { /* ... */ }
-.flight-card { /* ... */ }
-.badge-green { /* ... */ }
+/* CSS Streamlit Khusus */
+h1, h2, h3, h4 {
+    color: #a9df52;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+section[data-testid="stSidebar"] {
+    background-color: #111;
+    color: #d0d3ca;
+}
+.stButton>button {
+    background-color: #1a2a1f;
+    color: #a9df52;
+    border: 1px solid #3f4f3f;
+    border-radius: 8px;
+    font-weight: bold;
+}
+/* ... (lanjutan CSS Streamlit) ... */
+.radar {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20,255,50,0.05) 20%, transparent 21%),
+              radial-gradient(circle, rgba(20,255,50,0.1) 10%, transparent 11%);
+  background-size: 20px 20px;
+  border: 2px solid #33ff55;
+  overflow: hidden;
+  margin: auto;
+  box-shadow: 0 0 20px #33ff55;
+}
+.radar:before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 50%; height: 2px;
+  background: linear-gradient(90deg, #33ff55, transparent);
+  transform-origin: 100% 50%;
+  animation: sweep 2.5s linear infinite;
+}
+@keyframes sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+hr, .stDivider {
+    border-top: 1px solid #2f3a2f;
+}
+.flight-card {
+    padding: 20px 24px;
+    background-color: #0f1111;
+    border: 1px solid #2b3c2b;
+    border-radius: 10px;
+    margin-bottom: 22px;
+}
+.flight-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #9adf4f;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+}
+.metric-label {
+    font-size: 0.70rem;
+    text-transform: uppercase;
+    color: #9fa8a0;
+    letter-spacing: 0.6px;
+    margin-bottom: -6px;
+}
+.metric-value {
+    font-size: 1.9rem;
+    color: #b6ff6d;
+    margin-top: -6px;
+    font-weight: 700;
+}
+.small-note {
+    font-size: 0.78rem;
+    color: #9fa8a0;
+}
+.badge-green { color:#002b00; background:#b6ff6d; padding:4px 8px; border-radius:6px; font-weight:700; }
+.badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
+.badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -106,7 +175,7 @@ API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384  # konversi ke knot
 
 # =====================================
-# 🧰 UTILITAS (Fungsi tetap sama)
+# 🧰 UTILITAS
 # =====================================
 @st.cache_data(ttl=300)
 def fetch_forecast(adm1: str):
@@ -129,6 +198,7 @@ def flatten_cuaca_entry(entry):
                 "lon": lokasi.get("lon"),
                 "lat": lokasi.get("lat"),
             })
+            # safe datetime parse
             r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
             r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
             rows.append(r)
@@ -141,9 +211,14 @@ def flatten_cuaca_entry(entry):
 def estimate_dewpoint(temp, rh):
     if pd.isna(temp) or pd.isna(rh):
         return None
+    # simple approximation
     return temp - ((100 - rh) / 5)
 
 def ceiling_proxy_from_tcc(tcc_pct):
+    """
+    Proxy estimate for ceiling (feet) using cloud cover percentage.
+    Returns estimated ceiling category in feet (median of category) and as label.
+    """
     if pd.isna(tcc_pct):
         return None, "Unknown"
     tcc = float(tcc_pct)
@@ -157,6 +232,9 @@ def ceiling_proxy_from_tcc(tcc_pct):
         return 800, "OVC (<1000 ft)"
 
 def classify_ifr_vfr(visibility_m, ceiling_ft):
+    """
+    Classify into VFR / MVFR / IFR using conservative thresholds.
+    """
     if visibility_m is None or pd.isna(visibility_m):
         return "Unknown"
     vis = float(visibility_m)
@@ -170,6 +248,9 @@ def classify_ifr_vfr(visibility_m, ceiling_ft):
     return "Unknown"
 
 def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
+    """
+    Simple tactical recommendation rules (conservative).
+    """
     rationale = []
     takeoff = "Recommended"
     landing = "Recommended"
@@ -192,6 +273,7 @@ def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
         rationale.append("Conditions within conservative operational limits.")
     return takeoff, landing, rationale
 
+# Visual badge helper
 def badge_html(status):
     if status == "VFR" or status == "Recommended":
         return "<span class='badge-green'>OK</span>"
@@ -222,6 +304,7 @@ with st.sidebar:
 st.title("Tactical Weather Operations Dashboard")
 st.markdown("*Source: BMKG Forecast API — Live Data*")
 
+# BLOK TRY DIMULAI DI SINI
 try:
     with st.spinner("🛰️ Acquiring weather intelligence..."):
         raw = fetch_forecast(adm1)
@@ -250,6 +333,7 @@ try:
         st.warning("No valid weather data found.")
         st.stop()
 
+    # compute ws_kt if not already present
     if "ws_kt" not in df.columns:
         df["ws_kt"] = df["ws"] * MS_TO_KT
     else:
@@ -258,6 +342,7 @@ try:
 # =====================================
 # 🕓 SLIDER WAKTU
 # =====================================
+    # Find the correct datetime column and set range
     if "local_datetime_dt" in df.columns and df["local_datetime_dt"].notna().any():
         df = df.sort_values("local_datetime_dt")
         min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
@@ -273,11 +358,13 @@ try:
         max_dt = len(df)-1
         use_col = None
 
+    # slider only when datetime exists
     if use_col:
         start_dt = st.sidebar.slider(
             "Time Range",
             min_value=min_dt,
             max_value=max_dt,
+            # Set default range to cover only the first forecast time
             value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt),
             step=pd.Timedelta(hours=3),
             format="HH:mm, MMM DD"
@@ -301,7 +388,6 @@ try:
     st.markdown('<div class="flight-title">✈ Key Meteorological Status</div>', unsafe_allow_html=True)
     
     colA, colB, colC, colD = st.columns(4)
-    # Tampilan metrik kunci (tidak diubah)
     with colA:
         st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
@@ -320,19 +406,56 @@ try:
         st.markdown(f"<div class='small-note'>Rain: {now.get('tp',0):.1f} mm (Accum.)</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
+
 # =====================================
 # ☁ METEOROLOGICAL DETAILS (SECONDARY)
 # =====================================
     st.markdown('<div class="flight-card">', unsafe_allow_html=True)
     st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
-    # Tampilan detail (tidak diubah)
+
     row1, row2, row3, row4 = st.columns(4)
     with row1:
         st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('tcc','—')}</div>", unsafe_allow_html=True)
-    # ... (lanjutan metrik sekunder) ...
-    st.markdown("</div>", unsafe_allow_html=True)
+    with row2:
+        st.markdown("<div class='metric-label'>Wind Direction (°)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('wd_deg','—')}</div>", unsafe_allow_html=True)
+    with row3:
+        st.markdown("<div class='metric-label'>Wind Dir Code</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('wd','—')}</div>", unsafe_allow_html=True)
+    with row4:
+        st.markdown("<div class='metric-label'>Visibility (m)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
 
+    row5, row6, row7, row8 = st.columns(4)
+    with row5:
+        st.markdown("<div class='metric-label'>Weather Code</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('weather','—')}</div>", unsafe_allow_html=True)
+    with row6:
+        st.markdown("<div class='metric-label'>Description</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
+    with row7:
+        st.markdown("<div class='metric-label'>Visibility Desc</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
+    with row8:
+        st.markdown("<div class='metric-label'>Time Index</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('time_index','—')}</div>", unsafe_allow_html=True)
+
+    row9, row10, row11, row12 = st.columns(4)
+    with row9:
+        st.markdown("<div class='metric-label'>Local Time</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('local_datetime','—')}</div>", unsafe_allow_html=True)
+    with row10:
+        st.markdown("<div class='metric-label'>Analysis Time</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('analysis_date','—')}</div>", unsafe_allow_html=True)
+    with row11:
+        st.markdown("<div class='metric-label'>Province</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
+    with row12:
+        st.markdown("<div class='metric-label'>City</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('kotkab','—')}</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================================
 # === MET REPORT (QAM REPLACEMENT) - SESUAI LAMPIRAN
@@ -347,75 +470,75 @@ try:
     visibility_m = now.get('vs')
     wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
     wind_variation = "Not available (BMKG Forecast)" 
-    
+
     # 📌 START: MEMBANGUN HTML UNTUK LAPORAN QAM
     # Seluruh konten HTML laporan QAM dibuat di sini.
     met_report_html_content = f"""
-<div class="met-report-container">
-    <div class="met-report-header">MARKAS BESAR ANGKATAN UDARA</div>
-    <div class="met-report-subheader">DINAS PENGEMBANGAN OPERASI</div>
-    <div class="met-report-header" style="border-top: none;">METEOROLOGICAL REPORT FOR TAE OFF AND LANDING</div>
-    <table class="met-report-table">
-        <tr>
-            <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
-            <td>{now.get('local_datetime','—')} (Local) / {now.get('utc_datetime','—')} (UTC)</td>
-        </tr>
-        <tr>
-            <th>AERODROME IDENTIFICATION</th>
-            <td>{now.get('kotkab','—')} ({now.get('adm2','—')})</td>
-        </tr>
-        <tr>
-            <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
-            <td>{wind_info} / Variation: {wind_variation}</td>
-        </tr>
-        <tr>
-            <th>HORIZONTAL VISIBILITY</th>
-            <td>{visibility_m} m ({now.get('vs_text','—')})</td>
-        </tr>
-        <tr>
-            <th>RUNWAY VISUAL RANGE</th>
-            <td>— (RVR not available)</td>
-        </tr>
-        <tr>
-            <th>PRESENT WEATHER</th>
-            <td>{now.get('weather_desc','—')} (Accum. Rain: {now.get('tp',0):.1f} mm)</td>
-        </tr>
-        <tr>
-            <th>AMOUNT AND HEIGHT OF BASE OF LOW CLOUD</th>
-            <td>Cloud Cover: {now.get('tcc','—')}% / {ceiling_display}</td>
-        </tr>
-        <tr>
-            <th>AIR TEMPERATURE AND DEW POINT TEMPERATURE</th>
-            <td>Air Temp: {now.get('t','—')}°C / Dew Point: {dewpt_disp} / RH: {now.get('hu','—')}%</td>
-        </tr>
-        <tr>
-            <th>QNH</th>
-            <td>
-                .................. mbs<br>
-                .................. ins*<br>
-                .................. mm Hg*
-                <span style='font-size: 0.75rem; color:#777;'> (Barometric Data not available from Source)</span>
-            </td>
-        </tr>
-        <tr>
-            <th>QFE*</th>
-            <td>
-                .................. mbs<br>
-                .................. ins*<br>
-                .................. mm Hg*
-            </td>
-        </tr>
-        <tr>
-            <th>SUPPLEMENTARY INFORMATION</th>
-            <td>{now.get('provinsi','—')} / Latitude: {now.get('lat','—')}, Longitude: {now.get('lon','—')}</td>
-        </tr>
-        <tr>
-            <th>TIME OF ISSUE (UTC) / OBSERVER</th>
-            <td>{now.get('utc_datetime','—')} / FCST ON DUTY</td>
-        </tr>
-    </table>
-</div>
-"""
+    <div class="met-report-container">
+        <div class="met-report-header">MARKAS BESAR ANGKATAN UDARA</div>
+        <div class="met-report-subheader">DINAS PENGEMBANGAN OPERASI</div>
+        <div class="met-report-header" style="border-top: none;">METEOROLOGICAL REPORT FOR TAE OFF AND LANDING</div>
+        <table class="met-report-table">
+            <tr>
+                <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
+                <td>{now.get('local_datetime','—')} (Local) / {now.get('utc_datetime','—')} (UTC)</td>
+            </tr>
+            <tr>
+                <th>AERODROME IDENTIFICATION</th>
+                <td>{now.get('kotkab','—')} ({now.get('adm2','—')})</td>
+            </tr>
+            <tr>
+                <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
+                <td>{wind_info} / Variation: {wind_variation}</td>
+            </tr>
+            <tr>
+                <th>HORIZONTAL VISIBILITY</th>
+                <td>{visibility_m} m ({now.get('vs_text','—')})</td>
+            </tr>
+            <tr>
+                <th>RUNWAY VISUAL RANGE</th>
+                <td>— (RVR not available)</td>
+            </tr>
+            <tr>
+                <th>PRESENT WEATHER</th>
+                <td>{now.get('weather_desc','—')} (Accum. Rain: {now.get('tp',0):.1f} mm)</td>
+            </tr>
+            <tr>
+                <th>AMOUNT AND HEIGHT OF BASE OF LOW CLOUD</th>
+                <td>Cloud Cover: {now.get('tcc','—')}% / {ceiling_display}</td>
+            </tr>
+            <tr>
+                <th>AIR TEMPERATURE AND DEW POINT TEMPERATURE</th>
+                <td>Air Temp: {now.get('t','—')}°C / Dew Point: {dewpt_disp} / RH: {now.get('hu','—')}%</td>
+            </tr>
+            <tr>
+                <th>QNH</th>
+                <td>
+                    .................. mbs<br>
+                    .................. ins*<br>
+                    .................. mm Hg*
+                    <span style='font-size: 0.75rem; color:#777;'> (Barometric Data not available from Source)</span>
+                </td>
+            </tr>
+            <tr>
+                <th>QFE*</th>
+                <td>
+                    .................. mbs<br>
+                    .................. ins*<br>
+                    .................. mm Hg*
+                </td>
+            </tr>
+            <tr>
+                <th>SUPPLEMENTARY INFORMATION</th>
+                <td>{now.get('provinsi','—')} / Latitude: {now.get('lat','—')}, Longitude: {now.get('lon','—')}</td>
+            </tr>
+            <tr>
+                <th>TIME OF ISSUE (UTC) / OBSERVER</th>
+                <td>{now.get('utc_datetime','—')} / FCST ON DUTY</td>
+            </tr>
+        </table>
+    </div>
+    """
     # 📌 END: MEMBANGUN HTML UNTUK LAPORAN QAM
 
     # Menggabungkan CSS dan konten HTML untuk file yang diunduh
@@ -424,6 +547,17 @@ try:
     st.markdown("---")
     st.subheader("📝 Meteorological Report (QAM/Form Replication)")
     st.markdown(met_report_html_content, unsafe_allow_html=True)
+    
+    # 🌟 IMPLEMENTASI TOMBOL DOWNLOAD QAM DI BAWAH PARAMETER QAM
+    qam_filename = f"MET_REPORT_{loc_choice}_{now.get('local_datetime','—').replace(' ', '_').replace(':','')}.html"
+    st.download_button(
+        label="⬇ Download QAM Report (HTML)",
+        data=full_qam_html,
+        file_name=qam_filename,
+        mime="text/html",
+        help="Unduh laporan QAM sebagai file HTML. Buka di browser dan gunakan fungsi 'Cetak ke PDF' untuk konversi formal."
+    )
+    # -----------------------------------------------------------
 
 # =====================================
 # === DECISION MATRIX (KRUSIAL)
@@ -453,41 +587,114 @@ try:
     st.markdown("---")
 
 # =====================================
-# 📈 TRENDS, 🌪️ WINDROSE, 🗺️ MAP, 📋 TABLE (Tidak ada perubahan signifikan)
+# 📈 TRENDS
 # =====================================
-    # ... (Bagian TRENDS dan WINDROSE dilewati karena tidak ada perubahan fungsional) ...
+    st.subheader("📊 Parameter Trends")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
+    with c2:
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind (KT)"), use_container_width=True)
+        st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
 
 # =====================================
-# 💾 EXPORT - DITAMBAHKAN TOMBOL QAM DOWNLOAD
+# 🌪️ WINDROSE (ASLI)
 # =====================================
     st.markdown("---")
-    st.subheader("💾 Export Data & Report")
-    
-    # 🌟 TOMBOL BARU UNTUK DOWNLOAD QAM
-    qam_filename = f"MET_REPORT_{loc_choice}_{now.get('local_datetime','—').replace(' ', '_').replace(':','')}.html"
-    st.download_button(
-        label="⬇ Download QAM Report (HTML)",
-        data=full_qam_html,
-        file_name=qam_filename,
-        mime="text/html",
-        help="Unduh laporan QAM sebagai file HTML. Buka di browser dan gunakan fungsi 'Cetak ke PDF' untuk konversi formal."
-    )
+    st.subheader("🌪️ Windrose — Direction & Speed")
+    if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
+        df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
+        if not df_wr.empty:
+            bins_dir = np.arange(-11.25,360,22.5)
+            labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                          "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+            
+            # PERBAIKAN: Menghapus observed=True
+            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True) 
+            
+            speed_bins = [0,5,10,20,30,50,100]
+            speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
+            
+            # PERBAIKAN: Menghapus observed=True
+            df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
+            
+            # PERBAIKAN: Menghapus observed=True dari groupby
+            freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
+            
+            freq["percent"] = freq["count"]/freq["count"].sum()*100
+            az_map = {
+                "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
+                "SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,
+                "WNW":292.5,"NW":315,"NNW":337.5
+            }
+            freq["theta"] = freq["dir_sector"].map(az_map)
+            colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
+            fig_wr = go.Figure()
+            for i, sc in enumerate(speed_labels):
+                subset = freq[freq["speed_class"]==sc]
+                fig_wr.add_trace(go.Barpolar(
+                    r=subset["percent"], theta=subset["theta"],
+                    name=f"{sc} KT", marker_color=colors[i], opacity=0.85
+                ))
+            fig_wr.update_layout(
+                title="Windrose (KT)",
+                polar=dict(
+                    angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))),
+                    radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")
+                ),
+                legend_title="Wind Speed Class",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig_wr, use_container_width=True)
+        else:
+            st.info("Insufficient wind data for Windrose plot.")
+    else:
+        st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
 
-    # Tombol data mentah (CSV/JSON)
+# =====================================
+# 🗺️ MAP
+# =====================================
+    if show_map:
+        st.markdown("---")
+        st.subheader("🗺️ Tactical Map")
+        try:
+            lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
+            lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
+            st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
+        except Exception as e:
+            st.warning(f"Map unavailable: {e}")
+
+# =====================================
+# 📋 TABLE
+# =====================================
+    if show_table:
+        st.markdown("---")
+        st.subheader("📋 Forecast Table")
+        st.dataframe(df_sel)
+
+# =====================================
+# 💾 EXPORT
+# =====================================
+    st.markdown("---")
+    st.subheader("💾 Export Data")
+    # Tombol download QAM sudah dipindahkan ke atas
     csv = df_sel.to_csv(index=False)
     json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
     colA, colB = st.columns(2)
     with colA:
-        st.download_button("⬇ Data Mentah (CSV)", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
+        st.download_button("⬇ CSV", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
     with colB:
-        st.download_button("⬇ Data Mentah (JSON)", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
+        st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
 
 
+# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY
 except requests.exceptions.HTTPError as e:
     st.error(f"API Error: Could not fetch data. Check Province Code (ADM1). Status code: {e.response.status_code}")
 except requests.exceptions.ConnectionError:
     st.error("Connection Error: Could not connect to BMKG API.")
 except Exception as e:
+    # Mengatasi SyntaxError yang asli, sekarang Error ini akan menangkap error lain yang tidak terduga, termasuk TypeError lama.
     st.error(f"An unexpected error occurred: {e}")
 
 # =====================================
