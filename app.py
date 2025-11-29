@@ -5,7 +5,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
-import math # Tambahkan import math jika dibutuhkan, meskipun tidak digunakan di sini, tapi bagus untuk konteks meteorologi
+import math 
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
@@ -82,20 +82,23 @@ body {
     display: inline-block;
     width: 24px;
     height: 24px;
-    margin-right: 8px;
     vertical-align: middle;
-    transition: transform 0.5s; /* Untuk animasi rotasi halus */
+    transition: transform 0.5s; 
+    flex-shrink: 0; /* Penting agar ikon tidak mengecil */
 }
 /* Style untuk menampung ikon dan angka */
 .metric-wind-container {
     display: flex;
-    align-items: center;
-    line-height: 1; /* Penting untuk alignment vertikal */
+    align-items: center; /* Vertikal center */
+    line-height: 1.1; 
+    margin-top: 5px; /* Menggantikan margin-top negatif di metric-value sebelumnya */
+    min-height: 38px; /* Memastikan ruang yang cukup */
 }
 .metric-wind-value {
     font-size: 1.9rem;
     color: #b6ff6d;
     font-weight: 700;
+    margin-left: 8px; /* Jarak antara ikon dan angka */
 }
 </style>
 """
@@ -303,20 +306,25 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
-# Fungsi baru untuk membuat panah angin (div HTML)
+# Fungsi untuk membuat panah angin (div HTML)
 def wind_arrow_html(direction_deg, speed_kt):
     """
     Menghasilkan div HTML dengan panah yang dirotasi sesuai arah angin.
     Arah angin (wd_deg) menunjukkan dari mana angin datang (North=0/360, East=90).
     Rotasi CSS harus sesuai dengan arah angin bertiup.
     """
-    if pd.isna(direction_deg) or pd.isna(speed_kt) or speed_kt == 0:
-        return "💨" # Ikon angin diam atau tidak tersedia
+    # Gunakan 0 jika data None atau NaN, tetapi tambahkan pengecekan kecepatan untuk ikon
+    dir_deg = float(direction_deg) if pd.notna(direction_deg) else 0 
+    speed = float(speed_kt) if pd.notna(speed_kt) else 0
+    
+    if speed < 0.5: # Jika kecepatan sangat rendah, tampilkan ikon statis atau spasi
+        return "<div class='wind-icon' style='width: 24px; height: 24px; text-align: center; color: #b6ff6d;'>💨</div>" 
 
     # Sudut Rotasi (dari 0° di atas, searah jarum jam) = Arah Angin Datang + 180°
     # Panah akan menunjuk ke arah angin pergi.
-    rotation_angle = (float(direction_deg) + 180) % 360
+    rotation_angle = (dir_deg + 180) % 360
     
+    # SVG untuk panah
     return f"""
     <div class='wind-icon' style='transform: rotate({rotation_angle}deg);'>
         <svg viewBox="0 0 100 100" style="fill: #b6ff6d; width: 100%; height: 100%;">
@@ -438,7 +446,7 @@ try:
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
         
-        # 🌟 MODIFIKASI INI: Menambahkan Vektor Angin 
+        # PERBAIKAN: Memastikan HTML Vektor Angin dan Nilai Terangkum dengan Rapi
         wind_arrow = wind_arrow_html(now.get('wd_deg'), now.get('ws_kt'))
         wind_speed_value = f"{now.get('ws_kt',0):.1f}"
         
@@ -448,7 +456,6 @@ try:
                 <span class='metric-wind-value'>{wind_speed_value}</span>
             </div>
         """, unsafe_allow_html=True)
-        # 🌟 END MODIFIKASI
         
         st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}° (From)</div>", unsafe_allow_html=True)
     with colC:
