@@ -301,12 +301,6 @@ def wind_arrow_html(direction_deg, speed_kt):
     if pd.isna(direction_deg) or pd.isna(speed_kt) or speed_kt == 0:
         return "💨" # Ikon angin diam atau tidak tersedia
 
-    # Arah angin datang (dari mana, North=0/360)
-    # Kita ingin panah menunjuk ke mana angin pergi.
-    # Rotasi CSS adalah searah jarum jam (CW).
-    # Angin dari Utara (0°) -> menunjuk ke Selatan (180°). Rotasi = 180°
-    # Angin dari Timur (90°) -> menunjuk ke Barat (270°). Rotasi = 270°
-    
     # Sudut Rotasi (dari 0° di atas, searah jarum jam) = Arah Angin Datang + 180°
     rotation_angle = (float(direction_deg) + 180) % 360
     
@@ -325,25 +319,9 @@ def calculate_uv_components(df, wind_speed_col='ws_kt', wind_dir_col='wd_deg'):
     Menghitung komponen zonal (U) dan meridional (V) angin.
     U: positif ke Timur, V: positif ke Utara.
     Arah angin (wd_deg) adalah arah datang angin (dari mana).
-    Sudut matematika (theta) adalah arah ke mana angin pergi (ke mana).
-    Theta = (wd_deg + 180) % 360
     """
-    df['theta'] = (df[wind_dir_col] + 180) % 360
     
-    # Konversi ke radian
-    df['theta_rad'] = np.deg2rad(df['theta'])
-    
-    # Komponen U (ke Timur): U = -ws * sin(theta_rad) (karena ws adalah dari mana)
-    # Namun, karena kita sudah mengkonversi ke arah "ke mana" (theta), kita gunakan:
-    # U = speed * sin(theta_rad)
-    # V = speed * cos(theta_rad)
-    
-    # Note: Dalam konvensi meteorologi (U+E, V+N):
-    # U = -speed * sin(dir_rad)
-    # V = -speed * cos(dir_rad)
-    # Dimana 'dir' adalah arah dari mana angin datang (0/360=N, 90=E).
-    
-    # Menggunakan Konvensi Meteorologi:
+    # Menggunakan Konvensi Meteorologi (U+E, V+N) dan 'dir' adalah arah dari mana angin datang (0/360=N, 90=E).
     df['wd_rad'] = np.deg2rad(df[wind_dir_col])
     df['u_component'] = -df[wind_speed_col] * np.sin(df['wd_rad'])
     df['v_component'] = -df[wind_speed_col] * np.cos(df['wd_rad'])
@@ -671,25 +649,13 @@ try:
         rh_rad = math.radians(runway_heading)
 
         # Sudut antara angin dan landasan (selisih absolut)
-        # Pilot menggunakan arah landasan dan arah angin datang
         angle_diff = abs(now.get('wd_deg') - runway_heading)
         if angle_diff > 180:
             angle_diff = 360 - angle_diff
         
-        # Headwind/Tailwind Component (angin sejajar landasan)
-        # Angin datang (WD) - Arah landasan (RH)
-        # Headwind (+) = Angin datang dari depan (0 deg)
-        # Crosswind (+) = Angin datang dari kanan (90 deg)
-        crosswind = now.get('ws_kt') * math.sin(math.radians(angle_diff))
-        head_tailwind = now.get('ws_kt') * math.cos(math.radians(angle_diff))
-        
-        # Menentukan apakah Headwind atau Tailwind
-        # Jika angin datang dari sektor 90° di depan pesawat (WD +/- 90 dari RH), itu Headwind.
-        # Jika angin datang dari sektor 90° di belakang pesawat (WD +/- 90 dari RH + 180), itu Tailwind.
-        
         # Perbedaan sudut yang sebenarnya (untuk menentukan Head/Tail)
         theta_rel = math.radians(now.get('wd_deg') - runway_heading)
-        headwind_kt = -now.get('ws_kt') * math.cos(theta_rel) # Headwind jika negatif (berlawanan arah)
+        headwind_kt = -now.get('ws_kt') * math.cos(theta_rel) # Headwind jika positif
         crosswind_kt = now.get('ws_kt') * math.sin(theta_rel) # Crosswind jika positif (dari kanan)
 
         st.subheader(f"🛬 Runway {runway_heading}° Wind Components")
@@ -787,7 +753,9 @@ try:
                 "lon": [lon],
                 "u": [now.get('u_component')],
                 "v": [now.get('v_component')],
-                "Speed": [now.get('ws_kt')]
+                "Speed": [now.get('ws_kt')],
+                # PERBAIKAN: Tambahkan kolom 'Location' yang berisi nama lokasi
+                "Location": [loc_choice]
             })
             
             # Gunakan Plotly Express untuk peta dengan vektor (Quiver map)
@@ -795,7 +763,8 @@ try:
                 df_map,
                 lat='lat',
                 lon='lon',
-                hover_name=loc_choice,
+                # PERBAIKAN: Gunakan nama kolom baru 'Location' sebagai hover_name
+                hover_name="Location",
                 color='Speed', # Warna berdasarkan kecepatan angin
                 projection="equirectangular",
                 template="plotly_dark"
