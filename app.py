@@ -1,201 +1,189 @@
 # ===========================================================
-# APPEND-ON: MET REPORT — Printable HTML (NO external libs)
-# Safe to paste at the BOTTOM of your existing Streamlit app
-# - Will auto-fill from existing 'now' and 'loc_choice' if available
-# - Will NOT raise NameError if they are missing
-# - No external dependencies (no pdfkit, no reportlab)
+# 📄 MET REPORT — AUTO-FILL & PRINTABLE (NO EXTERNAL LIBS)
+# Safe to paste at the BOTTOM of your app.py
 # ===========================================================
-# If 'st' isn't defined in this module (rare), import it.
-if 'st' not in globals():
-    import streamlit as st
 
+import streamlit as st
 import base64
 import datetime
 import math
 
-# Helper: safe extractor for objects like dict, pandas Series, or attribute-like
+
+# -----------------------------------------------------------
+# SAFE GETTER — tidak error jika now/field tidak ada
+# -----------------------------------------------------------
 def safe_get(obj, key, default="—"):
     try:
         if obj is None:
             return default
         if isinstance(obj, dict):
             return obj.get(key, default)
-        # pandas Series supports .get
         if hasattr(obj, "get"):
             v = obj.get(key, default)
             return v if v is not None else default
-        # attribute access fallback
         return getattr(obj, key, default)
     except Exception:
         return default
 
-# Try to auto-detect common globals from the main script
-_auto = {}
-try:
-    # 'now' often defined as df_sel.iloc[0] (pandas Series)
-    if 'now' in globals():
-        now_obj = globals()['now']
-    else:
-        now_obj = None
 
-    # fill fields from now if possible
-    wd_deg = safe_get(now_obj, "wd_deg", None)
-    ws_kt = safe_get(now_obj, "ws_kt", None)
-    if wd_deg is not None and wd_deg != "—" and ws_kt is not None and ws_kt != "—":
-        wind_auto = f"{wd_deg}° / {float(ws_kt):.1f} KT"
+# -----------------------------------------------------------
+# AUTO-DETECT DATA dari script utama
+# (now, loc_choice, dll)
+# -----------------------------------------------------------
+try:
+    now_obj = globals().get("now", None)
+
+    # wind
+    wd = safe_get(now_obj, "wd_deg", None)
+    ws = safe_get(now_obj, "ws_kt", None)
+    if wd not in (None, "—") and ws not in (None, "—"):
+        wind_auto = f"{wd}° / {float(ws):.1f} KT"
     else:
         wind_auto = "—"
 
+    # vis
     vis_auto = safe_get(now_obj, "vs", "—")
-    cloud_auto = safe_get(now_obj, "tcc", "—")
-    # weather description
-    wx_auto = safe_get(now_obj, "weather_desc", safe_get(now_obj, "weather", "—"))
-    temp_val = safe_get(now_obj, "t", None)
-    rh_val = safe_get(now_obj, "hu", None)
 
-    # attempt dew point via Magnus formula if t and rh available
-    dew_calc = None
-    try:
-        if temp_val is not None and temp_val != "—" and rh_val not in (None, "—"):
-            T = float(temp_val)
-            RH = float(rh_val)
-            # Magnus-Tetens approximation
-            a = 17.27
-            b = 237.7
-            gamma = (a * T) / (b + T) + math.log(RH/100.0)
-            dew_calc = (b * gamma) / (a - gamma)
-    except Exception:
-        dew_calc = None
-
-    if dew_calc is not None:
-        temp_auto = f"{temp_val}°C / {dew_calc:.1f}°C"
-    elif temp_val not in (None, "—"):
-        temp_auto = f"{temp_val}°C / —"
+    # cloud
+    cloud_auto = safe_get(now_obj, "tcc", None)
+    if cloud_auto not in (None, "—"):
+        cloud_str = f"{cloud_auto}% (TCC)"
     else:
-        temp_auto = "— / —"
+        cloud_str = "—"
 
-    # try loc_choice for aerodrome label
-    ad_auto = globals().get('loc_choice', "")
+    # wx
+    wx_auto = safe_get(now_obj, "weather_desc",
+                       safe_get(now_obj, "weather", "—"))
 
-    # basic qnh if present in 'now' or globals
+    # temp + dew point
+    temp_val = safe_get(now_obj, "t", None)
+    rh = safe_get(now_obj, "hu", None)
+    dew = None
+    try:
+        if temp_val not in (None, "—") and rh not in (None, "—"):
+            T = float(temp_val)
+            RH = float(rh)
+            a, b = 17.27, 237.7
+            gamma = (a*T)/(b+T) + math.log(RH/100)
+            dew = (b * gamma) / (a - gamma)
+    except:
+        dew = None
+
+    if dew is not None:
+        temp_auto = f"{temp_val}°C / {dew:.1f}°C"
+    else:
+        temp_auto = f"{temp_val}°C / —" if temp_val not in (None, "—") else "— / —"
+
+    # pressure
     qnh_auto = safe_get(now_obj, "qnh", "—")
-    if qnh_auto in (None, ""):
-        qnh_auto = "—"
 
-    _auto = {
-        "ad": ad_auto or "",
-        "wind": wind_auto,
-        "vis": vis_auto,
-        "rvr": "-",
-        "wx": wx_auto,
-        "cloud": f"{cloud_auto}% (TCC)" if cloud_auto not in (None,"—") else "—",
-        "temp": temp_auto,
-        "qnh": qnh_auto,
-        "qfe": "—",
-        "supp": "-",
-        "observer": "METWATCH OPS"
-    }
-    auto_ok = True
-except Exception:
-    _auto = {
-        "ad": "",
-        "wind": "—",
-        "vis": "—",
-        "rvr": "-",
-        "wx": "—",
-        "cloud": "—",
-        "temp": "— / —",
-        "qnh": "—",
-        "qfe": "—",
-        "supp": "-",
-        "observer": "METWATCH OPS"
-    }
-    auto_ok = False
+    # aerodrome
+    ad_auto = globals().get("loc_choice", "")
 
-# UI: headline + small guidance
-st.markdown("## 📄 MET REPORT — Takeoff / Landing (Printable)")
-st.info("Form bisa diisi manual. Jika app Anda mendefinisikan variabel `now` dan `loc_choice`, beberapa field akan terisi otomatis. Klik 'Download HTML' lalu buka & Print → Save as PDF di browser untuk menghasilkan PDF.")
+    auto = True
+except:
+    auto = False
+    ad_auto = ""
+    wind_auto = "—"
+    vis_auto = "—"
+    cloud_str = "—"
+    wx_auto = "—"
+    temp_auto = "— / —"
+    qnh_auto = "—"
 
-# Form inputs (two-column)
+
+st.markdown("## 📄 MET REPORT — Printable (Auto-Filled)")
+
+st.info(
+    "Semua field akan terisi otomatis berdasarkan data `now`. "
+    "Klik **Download HTML**, buka di browser, lalu **Print → Save as PDF**."
+)
+
+
+# -----------------------------------------------------------
+# UI FORM
+# -----------------------------------------------------------
 col1, col2 = st.columns(2)
+
 with col1:
-    ad = st.text_input("Aerodrome ID", value=_auto.get("ad",""))
-    wind = st.text_input("Surface Wind (DIR/Speed)", value=_auto.get("wind",""))
-    vis = st.text_input("Horizontal Visibility", value=_auto.get("vis",""))
-    rvr = st.text_input("Runway Visual Range (RVR)", value=_auto.get("rvr",""))
-    wx = st.text_input("Present Weather", value=_auto.get("wx",""))
-    cloud = st.text_input("Cloud amount & base (amount / height)", value=_auto.get("cloud",""))
+    ad = st.text_input("Aerodrome ID", value=ad_auto)
+    wind = st.text_input("Surface Wind", value=wind_auto)
+    vis = st.text_input("Visibility", value=vis_auto)
+    rvr = st.text_input("Runway Visual Range (RVR)", value="-")
+    wx = st.text_input("Present Weather", value=wx_auto)
+    cloud = st.text_input("Cloud (Amount / Base)", value=cloud_str)
+
 with col2:
-    temp = st.text_input("Air Temp / Dew Point", value=_auto.get("temp",""))
-    qnh = st.text_input("QNH (hPa)", value=_auto.get("qnh",""))
-    qfe = st.text_input("QFE (hPa)", value=_auto.get("qfe",""))
-    supp = st.text_area("Supplementary Information", value=_auto.get("supp",""))
-    observer = st.text_input("Observer", value=_auto.get("observer",""))
+    temp = st.text_input("Temperature / Dew Point", value=temp_auto)
+    qnh = st.text_input("QNH (hPa)", value=qnh_auto)
+    qfe = st.text_input("QFE (hPa)", value="—")
+    supp = st.text_area("Supplementary Info", value="-")
+    observer = st.text_input("Observer", value="METWATCH OPS")
 
 obs_time = datetime.datetime.utcnow().strftime("%d %b %Y %H:%M UTC")
 issue_time = datetime.datetime.utcnow().strftime("%H:%M UTC")
 
-# Build printable HTML (A4-friendly CSS)
-def build_met_html(ad, wind, vis, rvr, wx, cloud, temp, qnh, qfe, supp, issue_time, obs_time, observer):
-    return f"""<!doctype html>
+
+# -----------------------------------------------------------
+# BUILD PRINTABLE HTML
+# -----------------------------------------------------------
+def build_html(ad, wind, vis, rvr, wx, cloud, temp, qnh, qfe, supp, issue, obs, observer):
+    return f"""
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8"/>
 <title>MET REPORT</title>
 <style>
   @page {{ size: A4; margin: 18mm 12mm; }}
-  body {{ font-family: Arial, Helvetica, sans-serif; color:#0b0c0c; }}
-  .container {{ width: 100%; max-width: 820px; margin: 0 auto; }}
-  h1 {{ text-align:center; font-size:18px; margin-bottom:4px; }}
-  h2 {{ text-align:center; font-size:12px; margin-top:0; color:#333; }}
-  table {{ width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }}
-  td {{ border:1px solid #222; padding:8px; vertical-align:top; }}
-  .label {{ background:#efe6c9; font-weight:700; width:35%; }}
+  body {{ font-family: Arial; color:#000; }}
+  table {{ width:100%; border-collapse:collapse; font-size:14px; }}
+  td {{ border:1px solid #000; padding:6px; }}
+  .label {{ background:#e8dfc4; font-weight:700; width:38%; }}
   .value {{ background:#fffdf6; }}
-  .small {{ font-size:11px; color:#444; margin-top:8px; }}
-  /* ensure print uses these colors */
   @media print {{
-    .label {{ -webkit-print-color-adjust: exact; background:#efe6c9; }}
-    .value {{ -webkit-print-color-adjust: exact; background:#fffdf6; }}
+    .label, .value {{ -webkit-print-color-adjust: exact; }}
   }}
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>METEOROLOGICAL REPORT FOR TAKE OFF AND LANDING</h1>
-  <h2>MARKAS BESAR ANGKATAN UDARA — DINAS PENGEMBANGAN OPERASI</h2>
-
-  <table>
-    <tr><td class="label">METEOROLOGICAL OBS AT DATE/TIME (UTC)</td><td class="value">{obs_time}</td></tr>
-    <tr><td class="label">AERODROME IDENTIFICATION</td><td class="value">{ad}</td></tr>
-    <tr><td class="label">SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</td><td class="value">{wind}</td></tr>
-    <tr><td class="label">HORIZONTAL VISIBILITY</td><td class="value">{vis}</td></tr>
-    <tr><td class="label">RUNWAY VISUAL RANGE (RVR)</td><td class="value">{rvr}</td></tr>
-    <tr><td class="label">PRESENT WEATHER</td><td class="value">{wx}</td></tr>
-    <tr><td class="label">AMOUNT & HEIGHT OF BASE OF LOW CLOUD</td><td class="value">{cloud}</td></tr>
-    <tr><td class="label">AIR TEMPERATURE & DEW POINT TEMPERATURE</td><td class="value">{temp}</td></tr>
-    <tr><td class="label">QNH</td><td class="value">{qnh}</td></tr>
-    <tr><td class="label">QFE</td><td class="value">{qfe}</td></tr>
-    <tr><td class="label">SUPPLEMENTARY INFORMATION</td><td class="value">{supp}</td></tr>
-    <tr><td class="label">TIME OF ISSUE (UTC)</td><td class="value">{issue_time}</td></tr>
-    <tr><td class="label">OBSERVER</td><td class="value">{observer}</td></tr>
-  </table>
-
-  <div class="small">Note: Open the downloaded HTML in a browser and use Print → Save as PDF to produce a PDF file (A4).</div>
-</div>
+<h2 style="text-align:center;">METEOROLOGICAL REPORT FOR TAKEOFF / LANDING</h2>
+<table>
+<tr><td class="label">OBS TIME (UTC)</td><td class="value">{obs}</td></tr>
+<tr><td class="label">AERODROME</td><td class="value">{ad}</td></tr>
+<tr><td class="label">SURFACE WIND</td><td class="value">{wind}</td></tr>
+<tr><td class="label">VISIBILITY</td><td class="value">{vis}</td></tr>
+<tr><td class="label">RUNWAY VISUAL RANGE</td><td class="value">{rvr}</td></tr>
+<tr><td class="label">PRESENT WEATHER</td><td class="value">{wx}</td></tr>
+<tr><td class="label">CLOUD</td><td class="value">{cloud}</td></tr>
+<tr><td class="label">TEMP & DEWPOINT</td><td class="value">{temp}</td></tr>
+<tr><td class="label">QNH</td><td class="value">{qnh}</td></tr>
+<tr><td class="label">QFE</td><td class="value">{qfe}</td></tr>
+<tr><td class="label">SUPPLEMENT</td><td class="value">{supp}</td></tr>
+<tr><td class="label">ISSUE TIME</td><td class="value">{issue}</td></tr>
+<tr><td class="label">OBSERVER</td><td class="value">{observer}</td></tr>
+</table>
+<p style="font-size:11px; margin-top:6px;">Print → Save as PDF (A4)</p>
 </body>
-</html>"""
+</html>
+    """
 
-# Build HTML and provide download link (HTML file)
-html_content = build_met_html(ad, wind, vis, rvr, wx, cloud, temp, qnh, qfe, supp, issue_time, obs_time, observer)
-b64 = base64.b64encode(html_content.encode('utf-8')).decode('utf-8')
-download_filename = f"MET_REPORT_{datetime.datetime.utcnow().strftime('%Y%m%d_%H%M')}.html"
-download_link = f'<a href="data:text/html;base64,{b64}" download="{download_filename}">📄 Download MET REPORT (HTML) — Open & Print to PDF</a>'
 
-st.markdown(download_link, unsafe_allow_html=True)
+# -----------------------------------------------------------
+# DOWNLOAD FILE (HTML → PDF via browser)
+# -----------------------------------------------------------
+html_file = build_html(ad, wind, vis, rvr, wx, cloud,
+                       temp, qnh, qfe, supp, issue_time, obs_time, observer)
 
-# Preview (safe)
-with st.expander("Preview MET REPORT (Printable)"):
-    st.markdown(html_content, unsafe_allow_html=True)
+b64 = base64.b64encode(html_file.encode()).decode()
+filename = "MET_REPORT_" + datetime.datetime.utcnow().strftime("%Y%m%d_%H%M") + ".html"
 
-# Done — end of append-on block
+st.download_button(
+    "📄 Download MET REPORT (HTML)",
+    data=html_file,
+    file_name=filename,
+    mime="text/html"
+)
+
+with st.expander("🔎 Preview"):
+    st.markdown(html_file, unsafe_allow_html=True)
