@@ -5,7 +5,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
-import math # Import modul math untuk fungsi trigonometri
+import math # Tambahkan import math
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
@@ -76,6 +76,16 @@ body {
         -webkit-print-color-adjust: exact;
         color-adjust: exact;
     }
+}
+
+/* Penambahan CSS untuk Ikon Angin */
+.wind-icon {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+    vertical-align: middle;
+    transition: transform 0.5s; /* Untuk animasi rotasi halus */
 }
 </style>
 """
@@ -165,15 +175,6 @@ hr, .stDivider {
 .badge-green { color:#002b00; background:#b6ff6d; padding:4px 8px; border-radius:6px; font-weight:700; }
 .badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
 .badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
-
-/* CSS BARU UNTUK IKON ANGIN */
-.wind-icon {
-    display: inline-block;
-    width: 24px;
-    height: 24px;
-    margin-right: 8px;
-    vertical-align: middle;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -181,7 +182,7 @@ hr, .stDivider {
 # 📡 KONFIGURASI API
 # =====================================
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384  # konversi ke knot
+MS_TO_KT = 1.94384 # konversi ke knot
 
 # =====================================
 # 🧰 UTILITAS
@@ -302,8 +303,7 @@ def wind_arrow_html(direction_deg, speed_kt):
     if pd.isna(direction_deg) or pd.isna(speed_kt) or speed_kt == 0:
         return "💨" # Ikon angin diam atau tidak tersedia
 
-    # Sudut Rotasi (dari 0° di atas/Utara, searah jarum jam) = Arah Angin Datang + 180°
-    # Angin datang dari 90° (Timur), bertiup ke 270° (Barat). Rotasi harus 270°.
+    # Sudut Rotasi (dari 0° di atas, searah jarum jam) = Arah Angin Datang + 180°
     rotation_angle = (float(direction_deg) + 180) % 360
     
     return f"""
@@ -315,27 +315,22 @@ def wind_arrow_html(direction_deg, speed_kt):
     </div>
     """
 
-# Fungsi baru untuk menghitung komponen U dan V angin (untuk plot peta)
+# Fungsi baru untuk menghitung komponen U dan V angin
 def calculate_uv_components(df, wind_speed_col='ws_kt', wind_dir_col='wd_deg'):
     """
     Menghitung komponen zonal (U) dan meridional (V) angin.
     U: positif ke Timur, V: positif ke Utara.
     Arah angin (wd_deg) adalah arah datang angin (dari mana).
-    
-    Konvensi:
-    - Angin datang dari Utara (0 deg): U=0, V=-speed (bertuju ke S)
-    - Angin datang dari Timur (90 deg): U=-speed, V=0 (bertuju ke W)
     """
     
     # Menggunakan Konvensi Meteorologi (U+E, V+N) dan 'dir' adalah arah dari mana angin datang (0/360=N, 90=E).
     df['wd_rad'] = np.deg2rad(df[wind_dir_col])
-    # Komponen U (zonal/East-West): U = -ws * sin(wd_rad)
     df['u_component'] = -df[wind_speed_col] * np.sin(df['wd_rad'])
-    # Komponen V (meridional/North-South): V = -ws * cos(wd_rad)
     df['v_component'] = -df[wind_speed_col] * np.cos(df['wd_rad'])
     
     return df
-    
+
+
 # =====================================
 # 🎚️ SIDEBAR
 # =====================================
@@ -348,10 +343,6 @@ with st.sidebar:
     st.markdown("---")
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
-    
-    # Tambahkan input untuk arah landasan
-    runway_heading = st.number_input("Runway Heading (0-359°)", min_value=0, max_value=359, value=90, step=1)
-
     st.markdown("---")
     st.caption("Data Source: BMKG API · Military Ops v2.2")
 
@@ -395,9 +386,10 @@ try:
         df["ws_kt"] = df["ws"] * MS_TO_KT
     else:
         df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
-
+        
     # Hitung komponen U dan V angin untuk visualisasi peta
     df = calculate_uv_components(df)
+
 
 # =====================================
 # 🕓 SLIDER WAKTU
@@ -455,7 +447,7 @@ try:
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
         
-        # Tampilkan panah angin di sebelah nilai kecepatan (Perubahan di sini)
+        # Tampilkan panah angin di sebelah nilai kecepatan
         wind_arrow = wind_arrow_html(now.get('wd_deg'), now.get('ws_kt'))
         st.markdown(f"<div class='metric-value'>{wind_arrow}{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
         
@@ -649,51 +641,6 @@ try:
     for r in reco_rationale:
         st.markdown(f"- {r}")
     st.markdown("---")
-    
-    # PERHITUNGAN ANGIN LANDASAN (Crosswind/Headwind)
-    if pd.notna(now.get('ws_kt')) and pd.notna(now.get('wd_deg')):
-        wd_deg = now.get('wd_deg')
-        ws_kt = now.get('ws_kt')
-
-        wd_rad = math.radians(wd_deg)
-        rh_rad = math.radians(runway_heading)
-
-        # Sudut antara angin dan landasan (selisih absolut)
-        angle_diff = abs(wd_deg - runway_heading)
-        if angle_diff > 180:
-            angle_diff = 360 - angle_diff
-        
-        # Perbedaan sudut yang sebenarnya (untuk menentukan Head/Tail)
-        # Hitungan standar menggunakan perbedaan sudut antara arah *dari mana* angin datang (WD)
-        # dan arah landasan (RH).
-        theta_rel = math.radians(wd_deg - runway_heading)
-        
-        # Headwind/Tailwind: Positif jika Headwind, Negatif jika Tailwind (Angin datang dari depan landasan)
-        # Angin datang dari 90 deg, Landasan 90 deg -> Headwind (cos(0)=1)
-        # Angin datang dari 270 deg, Landasan 90 deg -> Tailwind (cos(180)=-1)
-        headwind_kt = ws_kt * math.cos(theta_rel) 
-        
-        # Crosswind: Positif jika dari Kanan, Negatif jika dari Kiri
-        # Angin datang dari 0 deg, Landasan 90 deg -> Left Crosswind (sin(-90)=-1)
-        # Angin datang dari 180 deg, Landasan 90 deg -> Right Crosswind (sin(90)=1)
-        crosswind_kt = ws_kt * math.sin(theta_rel) 
-
-        st.subheader(f"🛬 Runway {runway_heading}° Wind Components")
-        colH, colC = st.columns(2)
-        with colH:
-            H_status = "Headwind" if headwind_kt >= 0 else "Tailwind"
-            H_value = f"{abs(headwind_kt):.1f} KT"
-            st.markdown(f"**{H_status}**")
-            st.metric(H_status, H_value)
-        with colC:
-            C_status = "Right Crosswind" if crosswind_kt >= 0 else "Left Crosswind"
-            C_value = f"{abs(crosswind_kt):.1f} KT"
-            st.markdown(f"**{C_status}**")
-            st.metric(C_status, C_value)
-            
-        st.markdown(f"<p class='small-note'><i>Catatan: Angin Samping maksimum untuk pesawat tempur berkisar 15-25 KT tergantung tipe pesawat dan kondisi landasan.</i></p>", unsafe_allow_html=True)
-        st.markdown("---")
-
 
 # =====================================
 # 📈 TRENDS
@@ -759,7 +706,7 @@ try:
         st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
 
 # =====================================
-# 🗺️ MAP (PLOTLY EXPRESS) - Perubahan Besar di sini
+# 🗺️ MAP (PLOTLY EXPRESS)
 # =====================================
     if show_map:
         st.markdown("---")
@@ -780,6 +727,7 @@ try:
             })
             
             # Gunakan Plotly Express untuk peta dasar (Scatter Geo)
+            # st.map (map sederhana streamlit) dihapus dan diganti dengan Plotly
             fig_map = px.scatter_geo(
                 df_map,
                 lat='lat',
@@ -793,7 +741,7 @@ try:
                 size_max=10
             )
 
-            # --- Menambahkan Panah Vektor Angin (go.Scattergeo dengan symbol segitiga) ---
+            # --- MENAMBAHKAN TRACE SCATTERGEO UNTUK VISUALISASI VEKTOR ANGIN ---
             
             # Angin datang dari Direction (wd_deg). 
             # Panah harus menunjuk ke arah angin bertiup.
@@ -807,14 +755,16 @@ try:
                 mode='markers',
                 marker=dict(
                     symbol='triangle-up', # Marker segitiga ke atas (0/360 derajat)
-                    # Ukuran panah akan bervariasi berdasarkan kecepatan angin (agar menonjol)
+                    # Ukuran panah proporsional terhadap kecepatan (speed)
                     size=df_map['Speed'].apply(lambda s: 10 + s * 0.8), # Ukuran sedikit bertambah dengan kecepatan
                     color='White', # Warna panah
                     line_color='Black',
                     line_width=1,
-                    # Rotasi panah (Angle dalam Plotly adalah rotasi searah jarum jam dari sumbu Y/Utara)
+                    # Rotasi panah
                     angle=rotation_deg, 
                     sizemode='diameter',
+                    # sizeref: faktor penskalaan marker. 
+                    # 15.0 adalah nilai yang arbitrer untuk kontrol ukuran.
                     sizeref=df_map['Speed'].max() / 15.0 if df_map['Speed'].max() > 0 else 1.0, 
                 ),
                 name='Wind Vector',
@@ -825,6 +775,7 @@ try:
                 showlegend=False
             ))
 
+            # Memperbarui geos agar peta terlihat fokus
             fig_map.update_geos(
                 lataxis_range=[lat - 1, lat + 1],
                 lonaxis_range=[lon - 1, lon + 1],
@@ -872,7 +823,6 @@ except requests.exceptions.HTTPError as e:
 except requests.exceptions.ConnectionError:
     st.error("Connection Error: Could not connect to BMKG API.")
 except Exception as e:
-    # Mengatasi SyntaxError yang asli, sekarang Error ini akan menangkap error lain yang tidak terduga, termasuk TypeError lama.
     st.error(f"An unexpected error occurred: {e}")
 
 # =====================================
