@@ -706,7 +706,7 @@ try:
         st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
 
 # =====================================
-# 🗺️ MAP (PLOTLY EXPRESS)
+# 🗺️ MAP (PLOTLY EXPRESS - DENGAN VEKTOR ANGIN)
 # =====================================
     if show_map:
         st.markdown("---")
@@ -715,38 +715,33 @@ try:
             lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
             lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
             
-            # Buat DataFrame hanya untuk titik saat ini (now)
+            # Data untuk titik saat ini
             df_map = pd.DataFrame({
                 "lat": [lat],
                 "lon": [lon],
                 "u": [now.get('u_component')],
                 "v": [now.get('v_component')],
                 "Speed": [now.get('ws_kt')],
-                "Direction": [now.get('wd_deg')], # Tambahkan Direction
+                "Direction": [now.get('wd_deg')],
                 "Location": [loc_choice]
             })
             
-            # Gunakan Plotly Express untuk peta dasar (Scatter Geo)
-            # st.map (map sederhana streamlit) dihapus dan diganti dengan Plotly
+            # Peta Dasar Plotly Express
             fig_map = px.scatter_geo(
                 df_map,
                 lat='lat',
                 lon='lon',
                 hover_name="Location",
-                color='Speed', # Warna berdasarkan kecepatan angin
+                color='Speed',
                 projection="equirectangular",
                 template="plotly_dark",
-                # Atur agar titik tidak terlalu besar, hanya untuk hover
                 size=[1], 
                 size_max=10
             )
 
-            # --- MENAMBAHKAN TRACE SCATTERGEO UNTUK VISUALISASI VEKTOR ANGIN ---
+            # --- MENAMBAHKAN TRACE SCATTERGEO UNTUK VISUALISASI VEKTOR ANGIN (Panah) ---
             
-            # Angin datang dari Direction (wd_deg). 
-            # Panah harus menunjuk ke arah angin bertiup.
-            # Arah bertiup = (wd_deg + 180) % 360
-            
+            # Arah Rotasi Panah (panah menunjuk ke arah angin bertiup)
             rotation_deg = (df_map['Direction'] + 180) % 360 
 
             fig_map.add_trace(go.Scattergeo(
@@ -754,17 +749,13 @@ try:
                 lon=df_map['lon'],
                 mode='markers',
                 marker=dict(
-                    symbol='triangle-up', # Marker segitiga ke atas (0/360 derajat)
-                    # Ukuran panah proporsional terhadap kecepatan (speed)
-                    size=df_map['Speed'].apply(lambda s: 10 + s * 0.8), # Ukuran sedikit bertambah dengan kecepatan
-                    color='White', # Warna panah
+                    symbol='triangle-up',
+                    size=df_map['Speed'].apply(lambda s: 10 + s * 0.8),
+                    color='#b6ff6d', 
                     line_color='Black',
                     line_width=1,
-                    # Rotasi panah
                     angle=rotation_deg, 
                     sizemode='diameter',
-                    # sizeref: faktor penskalaan marker. 
-                    # 15.0 adalah nilai yang arbitrer untuk kontrol ukuran.
                     sizeref=df_map['Speed'].max() / 15.0 if df_map['Speed'].max() > 0 else 1.0, 
                 ),
                 name='Wind Vector',
