@@ -605,11 +605,19 @@ try:
             bins_dir = np.arange(-11.25,360,22.5)
             labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
-            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True, observed=True)
+            
+            # PERBAIKAN: Menghapus observed=True
+            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True) 
+            
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
-            df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True, observed=True)
-            freq = df_wr.groupby(["dir_sector","speed_class"], observed=True).size().reset_index(name="count")
+            
+            # PERBAIKAN: Menghapus observed=True
+            df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
+            
+            # PERBAIKAN: Menghapus observed=True dari groupby
+            freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
+            
             freq["percent"] = freq["count"]/freq["count"].sum()*100
             az_map = {
                 "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
@@ -681,6 +689,7 @@ except requests.exceptions.HTTPError as e:
 except requests.exceptions.ConnectionError:
     st.error("Connection Error: Could not connect to BMKG API.")
 except Exception as e:
+    # Mengatasi SyntaxError yang asli, sekarang Error ini akan menangkap error lain yang tidak terduga, termasuk TypeError lama.
     st.error(f"An unexpected error occurred: {e}")
 
 # =====================================
