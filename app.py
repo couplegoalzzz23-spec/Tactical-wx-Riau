@@ -357,7 +357,7 @@ try:
             "Time Range",
             min_value=min_dt,
             max_value=max_dt,
-            value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt), # Set default range 3 hours
+            value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt),
             step=pd.Timedelta(hours=3),
             format="HH:mm, MMM DD"
         )
@@ -399,7 +399,7 @@ try:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================================
-# === MET REPORT FOR TAKEOFF AND LANDING (SESUAI LAMPIRAN)
+# === MET REPORT FOR TAKEOFF AND LANDING (SESUAI LAMPIRAN FORMAL)
 # =====================================
 
     # prepare QAM values
@@ -523,7 +523,6 @@ try:
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-    # ... (SISA DASHBOARD SEPERTI TRENDS, WINDROSE, MAP, EXPORT) ...
     # Section remains the same as previous revised script to maintain full functionality
 
 # =====================================
