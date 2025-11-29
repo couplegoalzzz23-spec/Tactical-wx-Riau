@@ -80,25 +80,25 @@ body {
 /* Penambahan CSS untuk Ikon Angin */
 .wind-icon {
     display: inline-block;
-    width: 24px;
-    height: 24px;
+    width: 28px; /* Sedikit lebih besar */
+    height: 28px; /* Sedikit lebih besar */
     vertical-align: middle;
     transition: transform 0.5s; 
-    flex-shrink: 0; /* Penting agar ikon tidak mengecil */
+    flex-shrink: 0;
 }
 /* Style untuk menampung ikon dan angka */
 .metric-wind-container {
     display: flex;
     align-items: center; /* Vertikal center */
     line-height: 1.1; 
-    margin-top: 5px; /* Menggantikan margin-top negatif di metric-value sebelumnya */
-    min-height: 38px; /* Memastikan ruang yang cukup */
+    margin-top: 5px; 
+    min-height: 38px;
 }
 .metric-wind-value {
     font-size: 1.9rem;
     color: #b6ff6d;
     font-weight: 700;
-    margin-left: 8px; /* Jarak antara ikon dan angka */
+    margin-left: 8px; 
 }
 </style>
 """
@@ -313,15 +313,15 @@ def wind_arrow_html(direction_deg, speed_kt):
     Arah angin (wd_deg) menunjukkan dari mana angin datang (North=0/360, East=90).
     Rotasi CSS harus sesuai dengan arah angin bertiup.
     """
-    # Gunakan 0 jika data None atau NaN, tetapi tambahkan pengecekan kecepatan untuk ikon
     dir_deg = float(direction_deg) if pd.notna(direction_deg) else 0 
     speed = float(speed_kt) if pd.notna(speed_kt) else 0
     
-    if speed < 0.5: # Jika kecepatan sangat rendah, tampilkan ikon statis atau spasi
-        return "<div class='wind-icon' style='width: 24px; height: 24px; text-align: center; color: #b6ff6d;'>💨</div>" 
+    if speed < 0.5: 
+        # Tampilkan ikon angin statis jika kecepatan sangat rendah
+        return "<div class='wind-icon' style='width: 28px; height: 28px; text-align: center; font-size: 24px; line-height: 1; color: #b6ff6d;'>💨</div>" 
 
-    # Sudut Rotasi (dari 0° di atas, searah jarum jam) = Arah Angin Datang + 180°
-    # Panah akan menunjuk ke arah angin pergi.
+    # Sudut Rotasi: Angin datang (wd_deg) + 180 derajat. 
+    # Karena panah SVG menunjuk ke atas (0 derajat) secara default.
     rotation_angle = (dir_deg + 180) % 360
     
     # SVG untuk panah
@@ -443,13 +443,15 @@ try:
         st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
+        
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
         
-        # PERBAIKAN: Memastikan HTML Vektor Angin dan Nilai Terangkum dengan Rapi
+        # REVISI: IMPLEMENTASI VEKTOR ANGIN DI SINI
         wind_arrow = wind_arrow_html(now.get('wd_deg'), now.get('ws_kt'))
         wind_speed_value = f"{now.get('ws_kt',0):.1f}"
         
+        # Menggabungkan ikon panah dan nilai dalam satu container div
         st.markdown(f"""
             <div class='metric-wind-container'>
                 {wind_arrow}
@@ -458,14 +460,17 @@ try:
         """, unsafe_allow_html=True)
         
         st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}° (From)</div>", unsafe_allow_html=True)
+        
     with colC:
         st.markdown("<div class='metric-label'>Visibility (M)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-note'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
+        
     with colD:
         st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-note'>Rain: {now.get('tp',0):.1f} mm (Accum.)</div>", unsafe_allow_html=True)
+        
     st.markdown("</div>", unsafe_allow_html=True)
 
 
