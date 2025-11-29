@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import pandas as pd
@@ -123,18 +124,6 @@ hr, .stDivider {
     font-size: 0.78rem;
     color: #9fa8a0;
 }
-
-/* QAM/Decision visuals */
-.qam-box {
-    background-color: #0f110f;
-    border: 1px solid #223322;
-    padding: 12px;
-    border-radius: 8px;
-    color: #cfeec0;
-}
-.badge-green { color:#002b00; background:#b6ff6d; padding:4px 8px; border-radius:6px; font-weight:700; }
-.badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
-.badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -313,164 +302,6 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =====================================
-# === QAM + DECISION + TAKEOFF/LANDING RECOMMENDATION
-# =====================================
-
-def estimate_dewpoint(temp, rh):
-    if pd.isna(temp) or pd.isna(rh):
-        return None
-    # simple approximation
-    return temp - ((100 - rh) / 5)
-
-def ceiling_proxy_from_tcc(tcc_pct):
-    """
-    Proxy estimate for ceiling (feet) using cloud cover percentage.
-    NOTE: This is a heuristic. Real cloud base (AGL) is preferred.
-    Returns estimated ceiling category in feet (median of category) and as label.
-    """
-    if pd.isna(tcc_pct):
-        return None, "Unknown"
-    tcc = float(tcc_pct)
-    # Heuristic:
-    # - tcc < 25%  -> clear/sky, ceiling > 3000 ft
-    # - 25-50%     -> scattered, ceiling 1500-3000 ft
-    # - 50-75%     -> broken, ceiling 1000-1500 ft
-    # - >=75%      -> overcast, ceiling <1000 ft
-    if tcc < 25:
-        return 3500, "High (>3000 ft)"
-    elif tcc < 50:
-        return 2250, "Moderate (1500-3000 ft)"
-    elif tcc < 75:
-        return 1250, "Low (1000-1500 ft)"
-    else:
-        return 800, "Very Low (<1000 ft)"
-
-def classify_ifr_vfr(visibility_m, ceiling_ft):
-    """
-    Classify into VFR / MVFR / IFR using conservative thresholds:
-    - VFR: vis >= 5000 m AND ceiling > 1500 ft
-    - MVFR: vis 3000-5000 m OR ceiling 1000-1500 ft
-    - IFR: vis < 3000 m OR ceiling <= 1000 ft
-    """
-    if visibility_m is None or pd.isna(visibility_m):
-        return "Unknown"
-    vis = float(visibility_m)
-    if ceiling_ft is None:
-        # use visibility only
-        if vis >= 5000:
-            return "VFR"
-        elif vis >= 3000:
-            return "MVFR"
-        else:
-            return "IFR"
-    # both available
-    if vis >= 5000 and ceiling_ft > 1500:
-        return "VFR"
-    if (3000 <= vis < 5000) or (1000 < ceiling_ft <= 1500):
-        return "MVFR"
-    if vis < 3000 or ceiling_ft <= 1000:
-        return "IFR"
-    return "Unknown"
-
-def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
-    """
-    Simple tactical recommendation rules (conservative):
-    - If wind > 30 KT -> NOT RECOMMENDED
-    - If visibility < 1000 m -> NOT RECOMMENDED for landing (dangerous)
-    - If heavy rain (tp >= 20 mm accum) -> CAUTION (contaminated runway)
-    - Else RECOMMENDED
-    Returns tuple (takeoff_reco, landing_reco, rationale_list)
-    """
-    rationale = []
-    # defaults
-    takeoff = "Recommended"
-    landing = "Recommended"
-
-    if pd.notna(ws_kt) and float(ws_kt) >= 30:
-        takeoff = "Not Recommended"
-        landing = "Not Recommended"
-        rationale.append(f"High surface wind: {ws_kt:.1f} KT (>=30 KT limit)")
-    elif pd.notna(ws_kt) and float(ws_kt) >= 20:
-        rationale.append(f"Strong wind: {ws_kt:.1f} KT (>=20 KT advisory)")
-
-    if pd.notna(vs_m) and float(vs_m) < 1000:
-        landing = "Not Recommended"
-        rationale.append(f"Low visibility: {vs_m} m (<1000 m)")
-
-    if pd.notna(tp_mm) and float(tp_mm) >= 20:
-        takeoff = "Caution"
-        landing = "Caution"
-        rationale.append(f"Heavy accumulated rain: {tp_mm} mm (runway contamination possible)")
-    elif pd.notna(tp_mm) and float(tp_mm) > 5:
-        rationale.append(f"Moderate rainfall: {tp_mm} mm")
-
-    if not rationale:
-        rationale.append("Conditions within conservative operational limits.")
-
-    return takeoff, landing, rationale
-
-# prepare QAM values
-dewpt = estimate_dewpoint(now.get("t"), now.get("hu"))
-dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
-
-ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
-vis_m = now.get("vs")
-ifr_vfr = classify_ifr_vfr(vis_m, ceiling_est_ft)
-
-takeoff_reco, landing_reco, reco_rationale = takeoff_landing_recommendation(now.get("ws_kt"), now.get("vs"), now.get("tp"))
-
-# Visual badge helper
-def badge_html(status):
-    if status == "VFR" or status == "Recommended":
-        return "<span class='badge-green'>OK</span>"
-    if status == "MVFR" or status == "Caution":
-        return "<span class='badge-yellow'>CAUTION</span>"
-    if status == "IFR" or status == "Not Recommended":
-        return "<span class='badge-red'>NO-GO</span>"
-    return "<span class='badge-yellow'>UNKNOWN</span>"
-
-# Render QAM and Decision
-qam_text = f"""
-QAM — QUICK AVIATION METEO
-
-Location     : {now.get('kotkab','—')}, {now.get('provinsi','—')}
-Time         : {now.get('local_datetime','—')}
-Wind         : {now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT
-Visibility   : {now.get('vs','—')} m
-Cloud Cover  : {now.get('tcc','—')}% ({ceiling_label})
-Temperature  : {now.get('t','—')}°C
-Dew Point    : {dewpt_disp}
-RH           : {now.get('hu','—')}%
-Rainfall     : {now.get('tp','—')} mm (Accum.)
-Weather      : {now.get('weather_desc','—')}
-"""
-
-st.markdown("---")
-st.subheader("📘 QAM — Quick Aviation Meteo & Decisions")
-st.markdown(f"<div class='qam-box'><pre style='margin:0; font-family:monospace; font-size:0.95rem; color:#dfffe0'>{qam_text}</pre></div>", unsafe_allow_html=True)
-
-# Decision matrix summary
-st.markdown("")
-col1, col2, col3 = st.columns([1,1,1])
-with col1:
-    st.markdown("**Regulatory Category**")
-    ifr_badge = badge_html(ifr_vfr)
-    st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{ifr_badge}  <strong style='margin-left:8px;'>{ifr_vfr}</strong></div>", unsafe_allow_html=True)
-with col2:
-    st.markdown("**Takeoff Recommendation**")
-    st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{badge_html(takeoff_reco)}  <strong style='margin-left:8px;'>{takeoff_reco}</strong></div>", unsafe_allow_html=True)
-with col3:
-    st.markdown("**Landing Recommendation**")
-    st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{badge_html(landing_reco)}  <strong style='margin-left:8px;'>{landing_reco}</strong></div>", unsafe_allow_html=True)
-
-# Rationale / Notes
-st.markdown("**Rationale / Notes:**")
-for r in reco_rationale:
-    st.markdown(f"- {r}")
-
-st.markdown("---")
-
-# =====================================
 # ☁ METEOROLOGICAL DETAILS (SECONDARY)
 # =====================================
 st.markdown('<div class="flight-card">', unsafe_allow_html=True)
@@ -637,3 +468,5 @@ Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
 Military Ops UI · Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
+
+Berdasarkan script diatas tolong terjemahkan per bagian bagiannya
