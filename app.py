@@ -12,7 +12,7 @@ from datetime import datetime
 st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =====================================
-# 🌑 CSS — MILITARY STYLE + QAM TABLE REVISI
+# 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL + MET REPORT TABLE
 # =====================================
 st.markdown("""
 <style>
@@ -107,41 +107,32 @@ hr, .stDivider {
     font-size: 0.78rem;
     color: #9fa8a0;
 }
-
-/* Decision visuals */
-.decision-card {
-    padding: 12px; 
-    border-radius: 10px; 
-    background:#081108; 
-    text-align: center;
-    border: 1px solid #3f4f3f;
-    min-height: 100px;
+/* QAM/Decision visuals */
+.qam-box {
+    background-color: #0f110f;
+    border: 1px solid #223322;
+    padding: 12px;
+    border-radius: 8px;
+    color: #cfeec0;
 }
-.decision-label {
-    font-size: 0.8rem;
-    color: #9fa8a0;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-    font-weight: 600;
-}
-.badge-green { color:#002b00; background:#b6ff6d; padding:8px 12px; border-radius:8px; font-weight:900; font-size: 1.5rem; display: inline-block; min-width: 80%; }
-.badge-yellow { color:#4a3b00; background:#ffd86b; padding:8px 12px; border-radius:8px; font-weight:900; font-size: 1.5rem; display: inline-block; min-width: 80%; }
-.badge-red { color:#2b0000; background:#ff6b6b; padding:8px 12px; border-radius:8px; font-weight:900; font-size: 1.5rem; display: inline-block; min-width: 80%; }
+.badge-green { color:#002b00; background:#b6ff6d; padding:4px 8px; border-radius:6px; font-weight:700; }
+.badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
+.badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
 
-/* Custom CSS for the MET REPORT TABLE */
+/* Custom CSS for the MET REPORT TABLE (NEW/REVISED QAM FORMAT) */
 .met-report-table {
     border: 1px solid #2b3c2b;
     width: 100%;
     margin-bottom: 20px;
     background-color: #0f1111;
     font-size: 0.95rem;
+    border-collapse: collapse;
 }
 .met-report-table th, .met-report-table td {
     border: 1px solid #2b3c2b;
     padding: 8px;
     text-align: left;
     vertical-align: top;
-    height: 40px; /* Uniform height for structure */
 }
 .met-report-table th {
     background-color: #111;
@@ -182,7 +173,7 @@ API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384  # konversi ke knot
 
 # =====================================
-# 🧰 UTILITAS & FUNGSI DECISION (DIRETAIN)
+# 🧰 UTILITAS
 # =====================================
 @st.cache_data(ttl=300)
 def fetch_forecast(adm1: str):
@@ -205,6 +196,7 @@ def flatten_cuaca_entry(entry):
                 "lon": lokasi.get("lon"),
                 "lat": lokasi.get("lat"),
             })
+            # safe datetime parse
             r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
             r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
             rows.append(r)
@@ -217,6 +209,7 @@ def flatten_cuaca_entry(entry):
 def estimate_dewpoint(temp, rh):
     if pd.isna(temp) or pd.isna(rh):
         return None
+    # simple approximation
     return temp - ((100 - rh) / 5)
 
 def ceiling_proxy_from_tcc(tcc_pct):
@@ -249,29 +242,26 @@ def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
     rationale = []
     takeoff = "Recommended"
     landing = "Recommended"
-
     if pd.notna(ws_kt) and float(ws_kt) >= 30:
         takeoff = "Not Recommended"
         landing = "Not Recommended"
         rationale.append(f"High surface wind: {ws_kt:.1f} KT (>=30 KT limit)")
     elif pd.notna(ws_kt) and float(ws_kt) >= 20:
         rationale.append(f"Strong wind: {ws_kt:.1f} KT (>=20 KT advisory)")
-
     if pd.notna(vs_m) and float(vs_m) < 1000:
         landing = "Not Recommended"
         rationale.append(f"Low visibility: {vs_m} m (<1000 m)")
-
     if pd.notna(tp_mm) and float(tp_mm) >= 20:
         takeoff = "Caution"
         landing = "Caution"
         rationale.append(f"Heavy accumulated rain: {tp_mm} mm (runway contamination possible)")
     elif pd.notna(tp_mm) and float(tp_mm) > 5:
         rationale.append(f"Moderate rainfall: {tp_mm} mm")
-
     if not rationale:
         rationale.append("Conditions within conservative operational limits.")
     return takeoff, landing, rationale
 
+# Visual badge helper
 def badge_html(status):
     if status == "VFR" or status == "Recommended":
         return "<span class='badge-green'>OK</span>"
@@ -280,6 +270,7 @@ def badge_html(status):
     if status == "IFR" or status == "Not Recommended":
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
+
 # =====================================
 # 🎚️ SIDEBAR
 # =====================================
@@ -293,7 +284,7 @@ with st.sidebar:
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
     st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v2.0")
+    st.caption("Data Source: BMKG API · Military Ops v2.1")
 
 # =====================================
 # 📡 LOAD DATA
@@ -306,7 +297,7 @@ try:
         raw = fetch_forecast(adm1)
     entries = raw.get("data", [])
     if not entries:
-        st.warning("No forecast data available for this province.")
+        st.warning("No forecast data available.")
         st.stop()
 
     mapping = {}
@@ -325,10 +316,11 @@ try:
     df = flatten_cuaca_entry(selected_entry)
 
     if df.empty:
-        st.warning("No valid weather data found for selected location.")
+        st.warning("No valid weather data found.")
         st.stop()
 
-    if "ws_kt" not in df.columns or df["ws_kt"].isna().all():
+    # compute ws_kt if not already present
+    if "ws_kt" not in df.columns:
         df["ws_kt"] = df["ws"] * MS_TO_KT
     else:
         df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
@@ -336,28 +328,30 @@ try:
 # =====================================
 # 🕓 SLIDER WAKTU
 # =====================================
+    # Find the correct datetime column and set range
     if "local_datetime_dt" in df.columns and df["local_datetime_dt"].notna().any():
         df = df.sort_values("local_datetime_dt")
         min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
         max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
         use_col = "local_datetime_dt"
+    elif "utc_datetime_dt" in df.columns and df["utc_datetime_dt"].notna().any():
+        df = df.sort_values("utc_datetime_dt")
+        min_dt = df["utc_datetime_dt"].dropna().min().to_pydatetime()
+        max_dt = df["utc_datetime_dt"].dropna().max().to_pydatetime()
+        use_col = "utc_datetime_dt"
     else:
-        if "utc_datetime_dt" in df.columns and df["utc_datetime_dt"].notna().any():
-            df = df.sort_values("utc_datetime_dt")
-            min_dt = df["utc_datetime_dt"].dropna().min().to_pydatetime()
-            max_dt = df["utc_datetime_dt"].dropna().max().to_pydatetime()
-            use_col = "utc_datetime_dt"
-        else:
-            min_dt = 0
-            max_dt = len(df)-1
-            use_col = None
+        min_dt = 0
+        max_dt = len(df)-1
+        use_col = None
 
+    # slider only when datetime exists
     if use_col:
         start_dt = st.sidebar.slider(
             "Time Range",
             min_value=min_dt,
             max_value=max_dt,
-            value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt),
+            # Set default range to cover only the first 3 hours if possible
+            value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt), 
             step=pd.Timedelta(hours=3),
             format="HH:mm, MMM DD"
         )
@@ -399,10 +393,10 @@ try:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================================
-# === MET REPORT FOR TAKEOFF AND LANDING (SESUAI LAMPIRAN FORMAL)
+# === MET REPORT (QAM REPLACEMENT) - SESUAI LAMPIRAN
 # =====================================
 
-    # prepare QAM values
+    # prepare MET REPORT values
     dewpt = estimate_dewpoint(now.get("t"), now.get("hu"))
     dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
     ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
@@ -412,7 +406,7 @@ try:
     wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
     wind_variation = "Not available" # BMKG API does not provide variation/gust
 
-    # Start HTML table structure
+    # Start HTML table structure (Formal Report)
     met_report_html = f"""
     <div class="met-report-header">MARKAS BESAR ANGKATAN UDARA</div>
     <div class="met-report-subheader">DINAS PENGEMBANGAN OPERASI</div>
@@ -482,7 +476,7 @@ try:
     </table>
     """
     st.markdown("---")
-    st.subheader("📝 Meteorological Report (Form Replication)")
+    st.subheader("📝 Meteorological Report (QAM/Form Replication)")
     st.markdown(met_report_html, unsafe_allow_html=True)
 
 # =====================================
@@ -496,103 +490,118 @@ try:
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("<div class='decision-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='decision-label'>Regulatory Category (Flight Rules)</div>", unsafe_allow_html=True)
-        st.markdown(badge_html(ifr_vfr), unsafe_allow_html=True)
-        st.markdown(f"<strong style='margin-top:5px; display:block; color:#a9df52;'>{ifr_vfr}</strong>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("**Regulatory Category**")
+        ifr_badge = badge_html(ifr_vfr)
+        st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{ifr_badge}  <strong style='margin-left:8px;'>{ifr_vfr}</strong></div>", unsafe_allow_html=True)
     with col2:
-        st.markdown("<div class='decision-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='decision-label'>Takeoff Recommendation</div>", unsafe_allow_html=True)
-        st.markdown(badge_html(takeoff_reco), unsafe_allow_html=True)
-        st.markdown(f"<strong style='margin-top:5px; display:block; color:#a9df52;'>{takeoff_reco}</strong>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("**Takeoff Recommendation**")
+        st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{badge_html(takeoff_reco)}  <strong style='margin-left:8px;'>{takeoff_reco}</strong></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown("<div class='decision-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='decision-label'>Landing Recommendation</div>", unsafe_allow_html=True)
-        st.markdown(badge_html(landing_reco), unsafe_allow_html=True)
-        st.markdown(f"<strong style='margin-top:5px; display:block; color:#a9df52;'>{landing_reco}</strong>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("**Landing Recommendation**")
+        st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{badge_html(landing_reco)}  <strong style='margin-left:8px;'>{landing_reco}</strong></div>", unsafe_allow_html=True)
 
     # Rationale / Notes
-    st.markdown("---")
-    st.subheader("⚠️ Rationale / Operational Notes:")
-    st.markdown('<div style="background-color:#1a1f1a; padding:15px; border-left: 4px solid #a9df52; border-radius: 4px;">', unsafe_allow_html=True)
+    st.markdown("**Rationale / Notes:**")
     for r in reco_rationale:
-        st.markdown(f"<p style='margin: 0 0 5px 0;'>• **{r}**</p>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
+        st.markdown(f"- {r}")
     st.markdown("---")
-    # Section remains the same as previous revised script to maintain full functionality
 
 # =====================================
-# 📈 TRENDS, WINDROSE, MAP, TABLE, EXPORT
+# ☁ METEOROLOGICAL DETAILS (SECONDARY) - DIHILANGKAN UNTUK MENGHINDARI REDUNDANSI
 # =====================================
-    
-    st.subheader("📊 Parameter Trends (Forecast Time Series)")
+# Bagian ini dihilangkan karena informasi sudah sangat detail di MET Report di atas
+
+# =====================================
+# 📈 TRENDS
+# =====================================
+    st.subheader("📊 Parameter Trends")
     c1, c2 = st.columns(2)
     with c1:
-        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature (°C) Trend"), use_container_width=True)
-        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity (%) Trend"), use_container_width=True)
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
     with c2:
-        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind Speed (KT) Trend"), use_container_width=True)
-        st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall (mm) Accumulation"), use_container_width=True)
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind (KT)"), use_container_width=True)
+        st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
 
+# =====================================
+# 🌪️ WINDROSE (ASLI)
+# =====================================
     st.markdown("---")
-    st.subheader("🌪️ Windrose — Direction & Speed Frequency")
-    if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns and not df_sel.dropna(subset=["wd_deg","ws_kt"]).empty:
+    st.subheader("🌪️ Windrose — Direction & Speed")
+    if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
         df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
-        bins_dir = np.arange(-11.25,360,22.5)
-        labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
-        df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)
-        speed_bins = [0,5,10,20,30,50,100]
-        speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
-        df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
-        
-        freq = df_wr.groupby(["dir_sector","speed_class"], observed=True).size().reset_index(name="count")
-        freq["percent"] = freq["count"]/freq["count"].sum()*100
-        az_map = {"N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,"SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,"WNW":292.5,"NW":315,"NNW":337.5}
-        freq["theta"] = freq["dir_sector"].map(az_map)
-        
-        colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
-        fig_wr = go.Figure()
-        for i, sc in enumerate(speed_labels):
-            subset = freq[freq["speed_class"]==sc]
-            fig_wr.add_trace(go.Barpolar(r=subset["percent"], theta=subset["theta"], name=f"{sc} KT", marker_color=colors[i], opacity=0.85))
-        fig_wr.update_layout(
-            title="Windrose (KT)",
-            polar=dict(angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))), radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")),
-            legend_title="Wind Speed Class",
-            template="plotly_dark"
-        )
-        st.plotly_chart(fig_wr, use_container_width=True)
+        if not df_wr.empty:
+            bins_dir = np.arange(-11.25,360,22.5)
+            labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                          "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True, observed=True)
+            speed_bins = [0,5,10,20,30,50,100]
+            speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
+            df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True, observed=True)
+            freq = df_wr.groupby(["dir_sector","speed_class"], observed=True).size().reset_index(name="count")
+            freq["percent"] = freq["count"]/freq["count"].sum()*100
+            az_map = {
+                "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
+                "SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,
+                "WNW":292.5,"NW":315,"NNW":337.5
+            }
+            freq["theta"] = freq["dir_sector"].map(az_map)
+            colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
+            fig_wr = go.Figure()
+            for i, sc in enumerate(speed_labels):
+                subset = freq[freq["speed_class"]==sc]
+                fig_wr.add_trace(go.Barpolar(
+                    r=subset["percent"], theta=subset["theta"],
+                    name=f"{sc} KT", marker_color=colors[i], opacity=0.85
+                ))
+            fig_wr.update_layout(
+                title="Windrose (KT)",
+                polar=dict(
+                    angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))),
+                    radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")
+                ),
+                legend_title="Wind Speed Class",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig_wr, use_container_width=True)
+        else:
+            st.info("Insufficient wind data for Windrose plot.")
     else:
-        st.info("Insufficient wind data for Windrose plot.")
+        st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
 
+# =====================================
+# 🗺️ MAP
+# =====================================
     if show_map:
         st.markdown("---")
-        st.subheader("🗺️ Tactical Map (Location Overview)")
+        st.subheader("🗺️ Tactical Map")
         try:
             lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
             lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
             st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
-        except Exception:
-            st.warning("Map unavailable: Coordinates error.")
+        except Exception as e:
+            st.warning(f"Map unavailable: {e}")
 
+# =====================================
+# 📋 TABLE
+# =====================================
     if show_table:
         st.markdown("---")
-        st.subheader("📋 Raw Forecast Table")
+        st.subheader("📋 Forecast Table")
         st.dataframe(df_sel)
 
+# =====================================
+# 💾 EXPORT
+# =====================================
     st.markdown("---")
     st.subheader("💾 Export Data")
     csv = df_sel.to_csv(index=False)
     json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
     colA, colB = st.columns(2)
     with colA:
-        st.download_button("⬇ Download CSV", csv, file_name=f"{adm1}_{loc_choice}_forecast.csv", mime="text/csv")
+        st.download_button("⬇ CSV", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
     with colB:
-        st.download_button("⬇ Download JSON", json_text, file_name=f"{adm1}_{loc_choice}_forecast.json", mime="application/json")
+        st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
 
 except requests.exceptions.HTTPError as e:
     st.error(f"API Error: Could not fetch data. Check Province Code (ADM1). Status code: {e.response.status_code}")
