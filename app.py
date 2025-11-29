@@ -5,6 +5,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import math # Import modul math untuk fungsi trigonometri
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
@@ -165,6 +166,13 @@ hr, .stDivider {
 .badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
 .badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
 
+.wind-icon {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -283,6 +291,66 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
+# Fungsi baru untuk membuat panah angin (div HTML)
+def wind_arrow_html(direction_deg, speed_kt):
+    """
+    Menghasilkan div HTML dengan panah yang dirotasi sesuai arah angin.
+    Arah angin (wd_deg) menunjukkan dari mana angin datang.
+    Rotasi CSS harus sesuai dengan arah angin bertiup.
+    """
+    if pd.isna(direction_deg) or pd.isna(speed_kt) or speed_kt == 0:
+        return "💨" # Ikon angin diam atau tidak tersedia
+
+    # Arah angin datang (dari mana, North=0/360)
+    # Kita ingin panah menunjuk ke mana angin pergi.
+    # Rotasi CSS adalah searah jarum jam (CW).
+    # Angin dari Utara (0°) -> menunjuk ke Selatan (180°). Rotasi = 180°
+    # Angin dari Timur (90°) -> menunjuk ke Barat (270°). Rotasi = 270°
+    
+    # Sudut Rotasi (dari 0° di atas, searah jarum jam) = Arah Angin Datang + 180°
+    rotation_angle = (float(direction_deg) + 180) % 360
+    
+    return f"""
+    <div class='wind-icon' style='transform: rotate({rotation_angle}deg);'>
+        <svg viewBox="0 0 100 100" style="fill: #b6ff6d; width: 100%; height: 100%;">
+            <path d="M50 10 L50 90 M50 10 L40 25 M50 10 L60 25" stroke="#b6ff6d" stroke-width="8" fill="none"/>
+            <path d="M50 10 L40 25 L60 25 Z" fill="#b6ff6d"/>
+        </svg>
+    </div>
+    """
+
+# Fungsi baru untuk menghitung komponen U dan V angin
+def calculate_uv_components(df, wind_speed_col='ws_kt', wind_dir_col='wd_deg'):
+    """
+    Menghitung komponen zonal (U) dan meridional (V) angin.
+    U: positif ke Timur, V: positif ke Utara.
+    Arah angin (wd_deg) adalah arah datang angin (dari mana).
+    Sudut matematika (theta) adalah arah ke mana angin pergi (ke mana).
+    Theta = (wd_deg + 180) % 360
+    """
+    df['theta'] = (df[wind_dir_col] + 180) % 360
+    
+    # Konversi ke radian
+    df['theta_rad'] = np.deg2rad(df['theta'])
+    
+    # Komponen U (ke Timur): U = -ws * sin(theta_rad) (karena ws adalah dari mana)
+    # Namun, karena kita sudah mengkonversi ke arah "ke mana" (theta), kita gunakan:
+    # U = speed * sin(theta_rad)
+    # V = speed * cos(theta_rad)
+    
+    # Note: Dalam konvensi meteorologi (U+E, V+N):
+    # U = -speed * sin(dir_rad)
+    # V = -speed * cos(dir_rad)
+    # Dimana 'dir' adalah arah dari mana angin datang (0/360=N, 90=E).
+    
+    # Menggunakan Konvensi Meteorologi:
+    df['wd_rad'] = np.deg2rad(df[wind_dir_col])
+    df['u_component'] = -df[wind_speed_col] * np.sin(df['wd_rad'])
+    df['v_component'] = -df[wind_speed_col] * np.cos(df['wd_rad'])
+    
+    return df
+
+
 # =====================================
 # 🎚️ SIDEBAR
 # =====================================
@@ -295,6 +363,10 @@ with st.sidebar:
     st.markdown("---")
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
+    
+    # Tambahkan input untuk arah landasan
+    runway_heading = st.number_input("Runway Heading (0-359°)", min_value=0, max_value=359, value=90, step=1)
+    
     st.markdown("---")
     st.caption("Data Source: BMKG API · Military Ops v2.2")
 
@@ -338,6 +410,9 @@ try:
         df["ws_kt"] = df["ws"] * MS_TO_KT
     else:
         df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
+
+    # Hitung komponen U dan V angin untuk visualisasi peta
+    df = calculate_uv_components(df)
 
 # =====================================
 # 🕓 SLIDER WAKTU
@@ -394,8 +469,12 @@ try:
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
+        
+        # Tampilkan panah angin di sebelah nilai kecepatan
+        wind_arrow = wind_arrow_html(now.get('wd_deg'), now.get('ws_kt'))
+        st.markdown(f"<div class='metric-value'>{wind_arrow}{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
+        
+        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}° (From)</div>", unsafe_allow_html=True)
     with colC:
         st.markdown("<div class='metric-label'>Visibility (M)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
@@ -585,6 +664,49 @@ try:
     for r in reco_rationale:
         st.markdown(f"- {r}")
     st.markdown("---")
+    
+    # PERHITUNGAN ANGIN LANDASAN (Crosswind/Headwind)
+    if pd.notna(now.get('ws_kt')) and pd.notna(now.get('wd_deg')):
+        wd_rad = math.radians(now.get('wd_deg'))
+        rh_rad = math.radians(runway_heading)
+
+        # Sudut antara angin dan landasan (selisih absolut)
+        # Pilot menggunakan arah landasan dan arah angin datang
+        angle_diff = abs(now.get('wd_deg') - runway_heading)
+        if angle_diff > 180:
+            angle_diff = 360 - angle_diff
+        
+        # Headwind/Tailwind Component (angin sejajar landasan)
+        # Angin datang (WD) - Arah landasan (RH)
+        # Headwind (+) = Angin datang dari depan (0 deg)
+        # Crosswind (+) = Angin datang dari kanan (90 deg)
+        crosswind = now.get('ws_kt') * math.sin(math.radians(angle_diff))
+        head_tailwind = now.get('ws_kt') * math.cos(math.radians(angle_diff))
+        
+        # Menentukan apakah Headwind atau Tailwind
+        # Jika angin datang dari sektor 90° di depan pesawat (WD +/- 90 dari RH), itu Headwind.
+        # Jika angin datang dari sektor 90° di belakang pesawat (WD +/- 90 dari RH + 180), itu Tailwind.
+        
+        # Perbedaan sudut yang sebenarnya (untuk menentukan Head/Tail)
+        theta_rel = math.radians(now.get('wd_deg') - runway_heading)
+        headwind_kt = -now.get('ws_kt') * math.cos(theta_rel) # Headwind jika negatif (berlawanan arah)
+        crosswind_kt = now.get('ws_kt') * math.sin(theta_rel) # Crosswind jika positif (dari kanan)
+
+        st.subheader(f"🛬 Runway {runway_heading}° Wind Components")
+        colH, colC = st.columns(2)
+        with colH:
+            H_status = "Headwind" if headwind_kt > 0 else "Tailwind"
+            H_value = f"{abs(headwind_kt):.1f} KT"
+            st.markdown(f"**{H_status}**")
+            st.metric(H_status, H_value)
+        with colC:
+            C_status = "Right Crosswind" if crosswind_kt > 0 else "Left Crosswind"
+            C_value = f"{abs(crosswind_kt):.1f} KT"
+            st.markdown(f"**{C_status}**")
+            st.metric(C_status, C_value)
+            
+        st.markdown(f"<p class='small-note'><i>Catatan: Angin Samping maksimum untuk pesawat tempur berkisar 15-25 KT tergantung tipe pesawat dan kondisi landasan.</i></p>", unsafe_allow_html=True)
+        st.markdown("---")
 
 # =====================================
 # 📈 TRENDS
@@ -610,16 +732,13 @@ try:
             labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
             
-            # PERBAIKAN: Menghapus observed=True
             df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True) 
             
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
             
-            # PERBAIKAN: Menghapus observed=True
             df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
             
-            # PERBAIKAN: Menghapus observed=True dari groupby
             freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
             
             freq["percent"] = freq["count"]/freq["count"].sum()*100
@@ -653,15 +772,63 @@ try:
         st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
 
 # =====================================
-# 🗺️ MAP
+# 🗺️ MAP (PLOTLY EXPRESS)
 # =====================================
     if show_map:
         st.markdown("---")
-        st.subheader("🗺️ Tactical Map")
+        st.subheader("🗺️ Tactical Map — Wind Vectors")
         try:
             lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
             lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
-            st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
+            
+            # Buat DataFrame hanya untuk titik saat ini (now)
+            df_map = pd.DataFrame({
+                "lat": [lat],
+                "lon": [lon],
+                "u": [now.get('u_component')],
+                "v": [now.get('v_component')],
+                "Speed": [now.get('ws_kt')]
+            })
+            
+            # Gunakan Plotly Express untuk peta dengan vektor (Quiver map)
+            fig_map = px.scatter_geo(
+                df_map,
+                lat='lat',
+                lon='lon',
+                hover_name=loc_choice,
+                color='Speed', # Warna berdasarkan kecepatan angin
+                projection="equirectangular",
+                template="plotly_dark"
+            )
+
+            # Tambahkan layer Vektor (Quiver)
+            fig_map.add_trace(go.Cone(
+                lon=df_map['lon'],
+                lat=df_map['lat'],
+                u=df_map['u'],
+                v=df_map['v'],
+                sizemode="absolute",
+                sizeref=np.max(df_map['Speed']) * 0.1, # Menyesuaikan ukuran panah
+                anchor='tail', # Panah dimulai dari titik
+                colorscale=[[0, '#00ffbf'], [1, '#ff0033']], # Skala warna untuk vektor
+                showscale=False
+            ))
+
+            fig_map.update_geos(
+                lataxis_range=[lat - 1, lat + 1],
+                lonaxis_range=[lon - 1, lon + 1],
+                scope='asia', # Fokus pada Asia
+                showland=True,
+                landcolor="rgb(20, 20, 20)",
+                showocean=True,
+                oceancolor="rgb(10, 30, 40)",
+                showsubunits=True,
+                subunitcolor="rgb(50, 50, 50)",
+            )
+            
+            fig_map.update_layout(height=400, margin={"r":0,"t":0,"l":0,"b":0})
+            st.plotly_chart(fig_map, use_container_width=True)
+            
         except Exception as e:
             st.warning(f"Map unavailable: {e}")
 
