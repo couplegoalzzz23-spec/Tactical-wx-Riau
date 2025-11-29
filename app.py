@@ -5,6 +5,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import math # Import modul math untuk fungsi trigonometri
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
@@ -165,6 +166,13 @@ hr, .stDivider {
 .badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
 .badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
 
+.wind-icon {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -283,6 +291,46 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
+# Fungsi baru untuk membuat panah angin (div HTML)
+def wind_arrow_html(direction_deg, speed_kt):
+    """
+    Menghasilkan div HTML dengan panah yang dirotasi sesuai arah angin.
+    Arah angin (wd_deg) menunjukkan dari mana angin datang.
+    Rotasi CSS harus sesuai dengan arah angin bertiup.
+    """
+    if pd.isna(direction_deg) or pd.isna(speed_kt) or speed_kt == 0:
+        return "💨" # Ikon angin diam atau tidak tersedia
+
+    # Sudut Rotasi (dari 0° di atas, searah jarum jam) = Arah Angin Datang + 180°
+    rotation_angle = (float(direction_deg) + 180) % 360
+    
+    # SVG untuk panah
+    return f"""
+    <div class='wind-icon' style='transform: rotate({rotation_angle}deg);'>
+        <svg viewBox="0 0 100 100" style="fill: #b6ff6d; width: 100%; height: 100%;">
+            <path d="M50 10 L50 90 M50 10 L40 25 M50 10 L60 25" stroke="#b6ff6d" stroke-width="8" fill="none"/>
+            <path d="M50 10 L40 25 L60 25 Z" fill="#b6ff6d"/>
+        </svg>
+    </div>
+    """
+
+# Fungsi baru untuk menghitung komponen U dan V angin
+def calculate_uv_components(df, wind_speed_col='ws_kt', wind_dir_col='wd_deg'):
+    """
+    Menghitung komponen zonal (U) dan meridional (V) angin.
+    U: positif ke Timur, V: positif ke Utara.
+    Arah angin (wd_deg) adalah arah datang angin (dari mana).
+    """
+    
+    # Menggunakan Konvensi Meteorologi (U+E, V+N) dan 'dir' adalah arah dari mana angin datang (0/360=N, 90=E).
+    df['wd_rad'] = np.deg2rad(df[wind_dir_col])
+    # Komponen U dan V negatif karena wd_deg adalah arah datang, bukan arah bertiup
+    df['u_component'] = -df[wind_speed_col] * np.sin(df['wd_rad'])
+    df['v_component'] = -df[wind_speed_col] * np.cos(df['wd_rad'])
+    
+    return df
+
+
 # =====================================
 # 🎚️ SIDEBAR
 # =====================================
@@ -296,7 +344,7 @@ with st.sidebar:
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
     st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v2.2")
+    st.caption("Data Source: BMKG API · Military Ops v2.3 (With Wind Vector)")
 
 # =====================================
 # 📡 LOAD DATA
@@ -338,6 +386,9 @@ try:
         df["ws_kt"] = df["ws"] * MS_TO_KT
     else:
         df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
+        
+    # Hitung komponen U dan V angin untuk visualisasi peta
+    df = calculate_uv_components(df)
 
 # =====================================
 # 🕓 SLIDER WAKTU
@@ -394,8 +445,12 @@ try:
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
+        
+        # Tampilkan panah angin di sebelah nilai kecepatan (Perubahan Utama 1)
+        wind_arrow = wind_arrow_html(now.get('wd_deg'), now.get('ws_kt'))
+        st.markdown(f"<div class='metric-value'>{wind_arrow}{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
+        
+        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}° (From)</div>", unsafe_allow_html=True)
     with colC:
         st.markdown("<div class='metric-label'>Visibility (M)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
@@ -610,16 +665,13 @@ try:
             labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
             
-            # PERBAIKAN: Menghapus observed=True
             df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True) 
             
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
             
-            # PERBAIKAN: Menghapus observed=True
             df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
             
-            # PERBAIKAN: Menghapus observed=True dari groupby
             freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
             
             freq["percent"] = freq["count"]/freq["count"].sum()*100
@@ -653,15 +705,87 @@ try:
         st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
 
 # =====================================
-# 🗺️ MAP
+# 🗺️ MAP (PLOTLY EXPRESS - Wind Vector)
 # =====================================
     if show_map:
         st.markdown("---")
-        st.subheader("🗺️ Tactical Map")
+        st.subheader("🗺️ Tactical Map — Wind Vectors")
         try:
             lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
             lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
-            st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
+            
+            # Buat DataFrame hanya untuk titik saat ini (now)
+            df_map = pd.DataFrame({
+                "lat": [lat],
+                "lon": [lon],
+                "u": [now.get('u_component')],
+                "v": [now.get('v_component')],
+                "Speed": [now.get('ws_kt')],
+                "Direction": [now.get('wd_deg')], # Tambahkan Direction
+                "Location": [loc_choice]
+            })
+            
+            # Gunakan Plotly Express untuk peta dasar (Scatter Geo)
+            fig_map = px.scatter_geo(
+                df_map,
+                lat='lat',
+                lon='lon',
+                hover_name="Location",
+                color='Speed', # Warna berdasarkan kecepatan angin
+                projection="equirectangular",
+                template="plotly_dark",
+                # Atur agar titik tidak terlalu besar, hanya untuk hover
+                size=[1], 
+                size_max=10
+            )
+
+            # --- PERUBAHAN UTAMA 2: Menggunakan Scattergeo dengan Marker custom untuk Panah Vektor ---
+            
+            # Angin datang dari Direction (wd_deg). 
+            # Panah harus menunjuk ke arah angin bertiup.
+            # Arah bertiup = (wd_deg + 180) % 360
+            
+            rotation_deg = (df_map['Direction'] + 180) % 360 
+
+            fig_map.add_trace(go.Scattergeo(
+                lat=df_map['lat'],
+                lon=df_map['lon'],
+                mode='markers',
+                marker=dict(
+                    symbol='triangle-up', # Marker segitiga ke atas (0/360 derajat)
+                    # Ukuran bervariasi berdasarkan kecepatan
+                    size=df_map['Speed'].apply(lambda s: 10 + s * 0.8), 
+                    color='White', # Warna panah
+                    line_color='Black',
+                    line_width=1,
+                    # Rotasi panah
+                    angle=rotation_deg, 
+                    sizemode='diameter',
+                    sizeref=df_map['Speed'].max() / 15.0 if df_map['Speed'].max() > 0 else 1.0, 
+                ),
+                name='Wind Vector',
+                hoverinfo='text',
+                hovertext=df_map.apply(
+                    lambda row: f"Wind: {row['Direction']:.0f}° / {row['Speed']:.1f} KT", axis=1
+                ),
+                showlegend=False
+            ))
+
+            fig_map.update_geos(
+                lataxis_range=[lat - 1, lat + 1],
+                lonaxis_range=[lon - 1, lon + 1],
+                scope='asia',
+                showland=True,
+                landcolor="rgb(20, 20, 20)",
+                showocean=True,
+                oceancolor="rgb(10, 30, 40)",
+                showsubunits=True,
+                subunitcolor="rgb(50, 50, 50)",
+            )
+            
+            fig_map.update_layout(height=400, margin={"r":0,"t":0,"l":0,"b":0})
+            st.plotly_chart(fig_map, use_container_width=True)
+            
         except Exception as e:
             st.warning(f"Map unavailable: {e}")
 
