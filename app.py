@@ -1,117 +1,126 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-from math import log
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+# ================================================
+# 📄 MET REPORT — PRINTABLE PDF (NO REPORTLAB)
+# ================================================
+import base64
+import datetime
+import pdfkit   # jika wkhtmltopdf tidak tersedia → auto fallback HTML
 
-st.set_page_config(page_title="Tactical Weather Sheet — Printable", layout="wide")
+st.markdown("## 📄 MET REPORT — Takeoff / Landing")
 
-# =====================================================
-# 1. Fungsi Perhitungan Dew Point
-# =====================================================
-def calc_dew_point(temp_c, rh):
-    # Rumus Magnus
-    a = 17.625
-    b = 243.04
-    alpha = ((a * temp_c) / (b + temp_c)) + np.log(rh / 100)
-    dew = (b * alpha) / (a - alpha)
-    return round(dew, 1)
-
-# =====================================================
-# 2. Fungsi Perhitungan QNH
-# =====================================================
-def calc_qnh(pressure_station, elevation_m):
-    # Rumus barometrik standar
-    qnh = pressure_station / ((1 - (0.0065 * elevation_m) / 288.15) ** 5.2561)
-    return round(qnh, 1)
-
-# =====================================================
-# 3. Input Data
-# =====================================================
-st.title("📄 Tactical Weather Sheet — Printable PDF")
-
-col1, col2, col3 = st.columns(3)
+# =============================
+# 🔘 Input Form MET REPORT
+# =============================
+col1, col2 = st.columns(2)
 
 with col1:
-    temp = st.number_input("Temperature (°C)", value=30.0)
-    rh = st.number_input("Relative Humidity (%)", value=70)
+    ad = st.text_input("Aerodrome ID", "WIBB / Pekanbaru")
+    wind = st.text_input("Wind DIR/SPEED", "240/08KT")
+    vis = st.text_input("Visibility", "8000 m")
+    rvr = st.text_input("Runway Visual Range", "-")
+    wx = st.text_input("Present Weather", "Nil")
+    cloud = st.text_input("Cloud (Amount/Height)", "FEW 1500 ft")
 
 with col2:
-    pressure = st.number_input("Station Pressure (hPa)", value=1008.0)
-    elevation = st.number_input("Elevation (m)", value=50)
+    temp = st.text_input("Temp / Dew Point", "32°C / 24°C")
+    qnh = st.text_input("QNH", "1008 hPa")
+    qfe = st.text_input("QFE", "-")
+    supp = st.text_area("Supplementary Info", "-")
+    observer = st.text_input("Observer", "METWATCH OPS")
 
-with col3:
-    wind = st.text_input("Wind (kt)", value="090/10")
-    vis = st.text_input("Visibility", value="8000 m")
 
-# Auto calculate
-dew_point = calc_dew_point(temp, rh)
-qnh = calc_qnh(pressure, elevation)
+obs_time = datetime.datetime.utcnow().strftime("%d %b %Y %H:%M UTC")
+issue_time = datetime.datetime.utcnow().strftime("%H:%M UTC")
 
-# =====================================================
-# 4. Tampilkan Data Table-style
-# =====================================================
-st.subheader("🧮 Hasil Perhitungan Otomatis")
+# =============================
+# 🔧 Construct HTML Layout
+# =============================
+def generate_met_html():
+    return f"""
+    <html>
+    <head>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                padding: 25px;
+            }}
+            h1 {{
+                text-align: center;
+                font-size: 18px;
+                margin-bottom: 5px;
+            }}
+            h2 {{
+                text-align: center;
+                font-size: 13px;
+                font-weight: normal;
+                margin-top: 0px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 15px;
+                font-size: 13px;
+            }}
+            td {{
+                border: 1px solid black;
+                padding: 6px;
+            }}
+            .label {{
+                background-color: #f2f2f2;
+                font-weight: bold;
+                width: 40%;
+            }}
+        </style>
+    </head>
 
-df = pd.DataFrame({
-    "Parameter": ["Temperature", "Relative Humidity", "Wind", "Visibility", "Dew Point", "QNH"],
-    "Value": [f"{temp} °C", f"{rh} %", wind, vis, f"{dew_point} °C", f"{qnh} hPa"]
-})
+    <body>
 
-st.dataframe(df, use_container_width=True)
+        <h1>METEOROLOGICAL REPORT FOR TAKE OFF AND LANDING</h1>
+        <h2>MARKAS BESAR ANGKATAN UDARA — DINAS PENGEMBANGAN OPERASI</h2>
 
-# =====================================================
-# 5. Fungsi Generate PDF
-# =====================================================
-def generate_pdf():
+        <table>
+            <tr><td class="label">METEOROLOGICAL OBS AT DATE/TIME (UTC)</td><td>{obs_time}</td></tr>
+            <tr><td class="label">AERODROME IDENTIFICATION</td><td>{ad}</td></tr>
+            <tr><td class="label">SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</td><td>{wind}</td></tr>
+            <tr><td class="label">HORIZONTAL VISIBILITY</td><td>{vis}</td></tr>
+            <tr><td class="label">RUNWAY VISUAL RANGE</td><td>{rvr}</td></tr>
+            <tr><td class="label">PRESENT WEATHER</td><td>{wx}</td></tr>
+            <tr><td class="label">AMOUNT & HEIGHT OF BASE OF LOW CLOUD</td><td>{cloud}</td></tr>
+            <tr><td class="label">AIR TEMPERATURE & DEW POINT TEMPERATURE</td><td>{temp}</td></tr>
+            <tr><td class="label">QNH</td><td>{qnh}</td></tr>
+            <tr><td class="label">QFE</td><td>{qfe}</td></tr>
+            <tr><td class="label">SUPPLEMENTARY INFORMATION</td><td>{supp}</td></tr>
+            <tr><td class="label">TIME OF ISSUE (UTC)</td><td>{issue_time}</td></tr>
+            <tr><td class="label">OBSERVER</td><td>{observer}</td></tr>
+        </table>
 
-    filename = "/mnt/data/tactical_weather_sheet.pdf"
-    doc = SimpleDocTemplate(filename, pagesize=A4)
+    </body>
+    </html>
+    """
 
-    styles = getSampleStyleSheet()
-    story = []
+# =============================
+# 📤 Download Button (PDF / HTML)
+# =============================
+def download_pdf_from_html(html, filename="MET_REPORT.pdf"):
+    try:
+        pdf = pdfkit.from_string(html, False)
+        b64 = base64.b64encode(pdf).decode()
+        return f"""
+            <a href="data:application/pdf;base64,{b64}"
+               download="{filename}">
+               📄 Download MET REPORT (PDF)
+            </a>
+        """
+    except:
+        b64 = base64.b64encode(html.encode()).decode()
+        return f"""
+            <a href="data:text/html;base64,{b64}"
+               download="MET_REPORT.html">
+               📄 Download MET REPORT (HTML Printable)
+            </a>
+        """
 
-    title = Paragraph("<b>Tactical Weather Sheet</b>", styles["Title"])
-    story.append(title)
-    story.append(Spacer(1, 12))
-
-    # Tabel untuk PDF
-    data = [["Parameter", "Value"]] + df.values.tolist()
-
-    table = Table(data, colWidths=[120, 250])
-
-    # Styling seperti kertas kuning krem
-    table_style = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8d9b5")),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#fcf6e8")),
-        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
-        ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
-        ("FONTSIZE", (0,0), (-1,-1), 10),
-        ("ALIGN", (0,0), (-1,-1), "LEFT"),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-    ])
-
-    table.setStyle(table_style)
-    story.append(table)
-
-    doc.build(story)
-    return filename
-
-# =====================================================
-# 6. Tombol Download
-# =====================================================
-if st.button("📥 Download Printable PDF"):
-    pdf_file = generate_pdf()
-
-    with open(pdf_file, "rb") as f:
-        st.download_button(
-            label="⬇️ Download Tactical Weather PDF",
-            data=f,
-            file_name="tactical_weather_sheet.pdf",
-            mime="application/pdf"
-        )
-
-st.success("PDF siap dicetak — format mirip lembar kertas asli.")
+# =============================
+# ▶️ Build HTML → Provide Download
+# =============================
+html = generate_met_html()
+st.markdown(download_pdf_from_html(html), unsafe_allow_html=True)
