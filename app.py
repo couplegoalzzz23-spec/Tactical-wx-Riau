@@ -754,39 +754,63 @@ try:
                 "u": [now.get('u_component')],
                 "v": [now.get('v_component')],
                 "Speed": [now.get('ws_kt')],
-                # PERBAIKAN: Tambahkan kolom 'Location' yang berisi nama lokasi
+                "Direction": [now.get('wd_deg')], # Tambahkan Direction
                 "Location": [loc_choice]
             })
             
-            # Gunakan Plotly Express untuk peta dengan vektor (Quiver map)
+            # Gunakan Plotly Express untuk peta dasar (Scatter Geo)
             fig_map = px.scatter_geo(
                 df_map,
                 lat='lat',
                 lon='lon',
-                # PERBAIKAN: Gunakan nama kolom baru 'Location' sebagai hover_name
                 hover_name="Location",
                 color='Speed', # Warna berdasarkan kecepatan angin
                 projection="equirectangular",
-                template="plotly_dark"
+                template="plotly_dark",
+                # Atur agar titik tidak terlalu besar, hanya untuk hover
+                size=[1], 
+                size_max=10
             )
 
-            # Tambahkan layer Vektor (Quiver)
-            fig_map.add_trace(go.Cone(
-                lon=df_map['lon'],
+            # --- PERBAIKAN: Mengganti go.Cone dengan go.Scattergeo untuk Panah Vektor ---
+            
+            # Angin datang dari Direction (wd_deg). 
+            # Panah harus menunjuk ke arah angin bertiup.
+            # Rotasi yang dibutuhkan (berlawanan jarum jam dari Timur) = (Arah bertiup) + 90
+            
+            # Arah bertiup = (wd_deg + 180) % 360
+            rotation_deg = (df_map['Direction'] + 180) % 360 
+
+            fig_map.add_trace(go.Scattergeo(
                 lat=df_map['lat'],
-                u=df_map['u'],
-                v=df_map['v'],
-                sizemode="absolute",
-                sizeref=np.max(df_map['Speed']) * 0.1, # Menyesuaikan ukuran panah
-                anchor='tail', # Panah dimulai dari titik
-                colorscale=[[0, '#00ffbf'], [1, '#ff0033']], # Skala warna untuk vektor
-                showscale=False
+                lon=df_map['lon'],
+                mode='markers',
+                marker=dict(
+                    symbol='triangle-up', # Marker segitiga ke atas (0/360 derajat)
+                    size=15,
+                    color='White', # Warna panah
+                    line_color='Black',
+                    line_width=1,
+                    # Rotasi panah: marker 11 menunjuk ke atas (0). Kita perlu rotasi
+                    # sesuai arah angin berhembus. PlotlyJS berputar berlawanan jarum jam.
+                    angle=rotation_deg, 
+                    # Skala ukuran panah berdasarkan kecepatan (opsional, disesuaikan)
+                    sizemode='diameter',
+                    sizeref=df_map['Speed'].max() / 15.0 if df_map['Speed'].max() > 0 else 1.0, 
+                    size=df_map['Speed'].apply(lambda s: 10 + s * 0.8) # Ukuran sedikit bertambah dengan kecepatan
+                ),
+                name='Wind Vector',
+                hoverinfo='text',
+                hovertext=df_map.apply(
+                    lambda row: f"Wind: {row['Direction']:.0f}° / {row['Speed']:.1f} KT", axis=1
+                ),
+                showlegend=False
             ))
 
             fig_map.update_geos(
                 lataxis_range=[lat - 1, lat + 1],
                 lonaxis_range=[lon - 1, lon + 1],
-                scope='asia', # Fokus pada Asia
+                scope='asia',
                 showland=True,
                 landcolor="rgb(20, 20, 20)",
                 showocean=True,
