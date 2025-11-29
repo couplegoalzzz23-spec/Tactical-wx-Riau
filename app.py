@@ -319,9 +319,11 @@ with st.sidebar:
 st.title("Tactical Weather Operations Dashboard")
 st.markdown("*Source: BMKG Forecast API — Live Data*")
 
+# BLOK TRY DIMULAI DI SINI
 try:
     with st.spinner("🛰️ Acquiring weather intelligence..."):
         raw = fetch_forecast(adm1)
+        
     entries = raw.get("data", [])
     if not entries:
         st.warning("No forecast data available.")
@@ -423,52 +425,52 @@ try:
 # =====================================
 # ☁ METEOROLOGICAL DETAILS (SECONDARY)
 # =====================================
-st.markdown('<div class="flight-card">', unsafe_allow_html=True)
-st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
+    st.markdown('<div class="flight-card">', unsafe_allow_html=True)
+    st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
 
-row1, row2, row3, row4 = st.columns(4)
-with row1:
-    st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('tcc','—')}</div>", unsafe_allow_html=True)
-with row2:
-    st.markdown("<div class='metric-label'>Wind Direction (°)</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('wd_deg','—')}</div>", unsafe_allow_html=True)
-with row3:
-    st.markdown("<div class='metric-label'>Wind Dir Code</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('wd','—')}</div>", unsafe_allow_html=True)
-with row4:
-    st.markdown("<div class='metric-label'>Visibility (m)</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
+    row1, row2, row3, row4 = st.columns(4)
+    with row1:
+        st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('tcc','—')}</div>", unsafe_allow_html=True)
+    with row2:
+        st.markdown("<div class='metric-label'>Wind Direction (°)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('wd_deg','—')}</div>", unsafe_allow_html=True)
+    with row3:
+        st.markdown("<div class='metric-label'>Wind Dir Code</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('wd','—')}</div>", unsafe_allow_html=True)
+    with row4:
+        st.markdown("<div class='metric-label'>Visibility (m)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
 
-row5, row6, row7, row8 = st.columns(4)
-with row5:
-    st.markdown("<div class='metric-label'>Weather Code</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('weather','—')}</div>", unsafe_allow_html=True)
-with row6:
-    st.markdown("<div class='metric-label'>Description</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
-with row7:
-    st.markdown("<div class='metric-label'>Visibility Desc</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
-with row8:
-    st.markdown("<div class='metric-label'>Time Index</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('time_index','—')}</div>", unsafe_allow_html=True)
+    row5, row6, row7, row8 = st.columns(4)
+    with row5:
+        st.markdown("<div class='metric-label'>Weather Code</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('weather','—')}</div>", unsafe_allow_html=True)
+    with row6:
+        st.markdown("<div class='metric-label'>Description</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
+    with row7:
+        st.markdown("<div class='metric-label'>Visibility Desc</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
+    with row8:
+        st.markdown("<div class='metric-label'>Time Index</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('time_index','—')}</div>", unsafe_allow_html=True)
 
-row9, row10, row11, row12 = st.columns(4)
-with row9:
-    st.markdown("<div class='metric-label'>Local Time</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('local_datetime','—')}</div>", unsafe_allow_html=True)
-with row10:
-    st.markdown("<div class='metric-label'>Analysis Time</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('analysis_date','—')}</div>", unsafe_allow_html=True)
-with row11:
-    st.markdown("<div class='metric-label'>Province</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
-with row12:
-    st.markdown("<div class='metric-label'>City</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric-value'>{now.get('kotkab','—')}</div>", unsafe_allow_html=True)
+    row9, row10, row11, row12 = st.columns(4)
+    with row9:
+        st.markdown("<div class='metric-label'>Local Time</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('local_datetime','—')}</div>", unsafe_allow_html=True)
+    with row10:
+        st.markdown("<div class='metric-label'>Analysis Time</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('analysis_date','—')}</div>", unsafe_allow_html=True)
+    with row11:
+        st.markdown("<div class='metric-label'>Province</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
+    with row12:
+        st.markdown("<div class='metric-label'>City</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('kotkab','—')}</div>", unsafe_allow_html=True)
 
-st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================================
 # === MET REPORT (QAM REPLACEMENT) - SESUAI LAMPIRAN
@@ -672,6 +674,8 @@ st.markdown("</div>", unsafe_allow_html=True)
     with colB:
         st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
 
+
+# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY
 except requests.exceptions.HTTPError as e:
     st.error(f"API Error: Could not fetch data. Check Province Code (ADM1). Status code: {e.response.status_code}")
 except requests.exceptions.ConnectionError:
