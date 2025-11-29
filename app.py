@@ -776,9 +776,8 @@ try:
             
             # Angin datang dari Direction (wd_deg). 
             # Panah harus menunjuk ke arah angin bertiup.
-            # Rotasi yang dibutuhkan (berlawanan jarum jam dari Timur) = (Arah bertiup) + 90
-            
             # Arah bertiup = (wd_deg + 180) % 360
+            
             rotation_deg = (df_map['Direction'] + 180) % 360 
 
             fig_map.add_trace(go.Scattergeo(
@@ -787,17 +786,15 @@ try:
                 mode='markers',
                 marker=dict(
                     symbol='triangle-up', # Marker segitiga ke atas (0/360 derajat)
-                    size=15,
+                    # Diperbaiki: Hanya ada satu definisi size
+                    size=df_map['Speed'].apply(lambda s: 10 + s * 0.8),
                     color='White', # Warna panah
                     line_color='Black',
                     line_width=1,
-                    # Rotasi panah: marker 11 menunjuk ke atas (0). Kita perlu rotasi
-                    # sesuai arah angin berhembus. PlotlyJS berputar berlawanan jarum jam.
+                    # Rotasi panah
                     angle=rotation_deg, 
-                    # Skala ukuran panah berdasarkan kecepatan (opsional, disesuaikan)
                     sizemode='diameter',
                     sizeref=df_map['Speed'].max() / 15.0 if df_map['Speed'].max() > 0 else 1.0, 
-                    size=df_map['Speed'].apply(lambda s: 10 + s * 0.8) # Ukuran sedikit bertambah dengan kecepatan
                 ),
                 name='Wind Vector',
                 hoverinfo='text',
