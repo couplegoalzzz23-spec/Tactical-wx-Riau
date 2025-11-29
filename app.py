@@ -5,7 +5,6 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
-import math 
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
@@ -76,29 +75,6 @@ body {
         -webkit-print-color-adjust: exact;
         color-adjust: exact;
     }
-}
-/* Penambahan CSS untuk Ikon Angin */
-.wind-icon {
-    display: inline-block;
-    width: 28px; /* Sedikit lebih besar */
-    height: 28px; /* Sedikit lebih besar */
-    vertical-align: middle;
-    transition: transform 0.5s; 
-    flex-shrink: 0;
-}
-/* Style untuk menampung ikon dan angka */
-.metric-wind-container {
-    display: flex;
-    align-items: center; /* Vertikal center */
-    line-height: 1.1; 
-    margin-top: 5px; 
-    min-height: 38px;
-}
-.metric-wind-value {
-    font-size: 1.9rem;
-    color: #b6ff6d;
-    font-weight: 700;
-    margin-left: 8px; 
 }
 </style>
 """
@@ -188,6 +164,7 @@ hr, .stDivider {
 .badge-green { color:#002b00; background:#b6ff6d; padding:4px 8px; border-radius:6px; font-weight:700; }
 .badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
 .badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -195,7 +172,7 @@ hr, .stDivider {
 # 📡 KONFIGURASI API
 # =====================================
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384 # konversi ke knot
+MS_TO_KT = 1.94384  # konversi ke knot
 
 # =====================================
 # 🧰 UTILITAS
@@ -306,34 +283,6 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
-# Fungsi untuk membuat panah angin (div HTML)
-def wind_arrow_html(direction_deg, speed_kt):
-    """
-    Menghasilkan div HTML dengan panah yang dirotasi sesuai arah angin.
-    Arah angin (wd_deg) menunjukkan dari mana angin datang (North=0/360, East=90).
-    Rotasi CSS harus sesuai dengan arah angin bertiup.
-    """
-    dir_deg = float(direction_deg) if pd.notna(direction_deg) else 0 
-    speed = float(speed_kt) if pd.notna(speed_kt) else 0
-    
-    if speed < 0.5: 
-        # Tampilkan ikon angin statis jika kecepatan sangat rendah
-        return "<div class='wind-icon' style='width: 28px; height: 28px; text-align: center; font-size: 24px; line-height: 1; color: #b6ff6d;'>💨</div>" 
-
-    # Sudut Rotasi: Angin datang (wd_deg) + 180 derajat. 
-    # Karena panah SVG menunjuk ke atas (0 derajat) secara default.
-    rotation_angle = (dir_deg + 180) % 360
-    
-    # SVG untuk panah
-    return f"""
-    <div class='wind-icon' style='transform: rotate({rotation_angle}deg);'>
-        <svg viewBox="0 0 100 100" style="fill: #b6ff6d; width: 100%; height: 100%;">
-            <path d="M50 10 L50 90 M50 10 L40 25 M50 10 L60 25" stroke="#b6ff6d" stroke-width="8" fill="none"/>
-            <path d="M50 10 L40 25 L60 25 Z" fill="#b6ff6d"/>
-        </svg>
-    </div>
-    """
-
 # =====================================
 # 🎚️ SIDEBAR
 # =====================================
@@ -443,34 +392,18 @@ try:
         st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
-        
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        
-        # REVISI: IMPLEMENTASI VEKTOR ANGIN DI SINI
-        wind_arrow = wind_arrow_html(now.get('wd_deg'), now.get('ws_kt'))
-        wind_speed_value = f"{now.get('ws_kt',0):.1f}"
-        
-        # Menggabungkan ikon panah dan nilai dalam satu container div
-        st.markdown(f"""
-            <div class='metric-wind-container'>
-                {wind_arrow}
-                <span class='metric-wind-value'>{wind_speed_value}</span>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}° (From)</div>", unsafe_allow_html=True)
-        
+        st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
     with colC:
         st.markdown("<div class='metric-label'>Visibility (M)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-note'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
-        
     with colD:
         st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-note'>Rain: {now.get('tp',0):.1f} mm (Accum.)</div>", unsafe_allow_html=True)
-        
     st.markdown("</div>", unsafe_allow_html=True)
 
 
