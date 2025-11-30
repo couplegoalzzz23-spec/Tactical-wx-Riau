@@ -77,7 +77,7 @@ body {
     }
 }
 
-/* Custom CSS for METAR Block */
+/* Custom CSS for METAR Block (Dihapus dari skrip utama, namun CSS-nya tetap di sini) */
 .metar-block {
     background-color: #1a2a1f;
     border: 1px solid #3f4f3f;
@@ -312,102 +312,8 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
-def tcc_to_metar_cloud(tcc_pct, ceiling_ft):
-    """
-    Konversi TCC (Total Cloud Cover) ke format METAR.
-    """
-    if pd.isna(tcc_pct):
-        return "NSC" # No Significant Clouds
-    tcc = float(tcc_pct)
-    # Konversi kaki ke ratusan kaki untuk METAR
-    ceiling_hft = int(round((ceiling_ft or 99999) / 100.0))
-    ceiling_str = f"{ceiling_hft:03d}" if ceiling_hft <= 999 else "///" # Max 999
-    
-    if tcc < 1:
-        return "SKC" # Sky Clear
-    elif tcc < 25:
-        return f"FEW{ceiling_str}"
-    elif tcc < 50:
-        return f"SCT{ceiling_str}"
-    elif tcc < 75:
-        return f"BKN{ceiling_str}"
-    else:
-        return f"OVC{ceiling_str}"
-
-def weather_code_to_metar(wx_code):
-    """
-    Proxy konversi kode cuaca BMKG ke kode METAR.
-    Asumsi: BMKG menggunakan 0-45 untuk cuaca, kita fokus pada yang signifikan.
-    """
-    if pd.isna(wx_code):
-        return ""
-    code = int(wx_code)
-    # Fokus pada Rain (RA), Thunderstorm (TS), dan Fog/Haze (FG/HZ)
-    if code in [2, 3, 4, 10, 60, 61, 63, 65, 80]: # Rain/Light Rain/Shower
-        return "RA"
-    elif code in [90, 95, 97]: # Thunderstorm/T-Storm w/ Rain
-        return "TSRA"
-    elif code in [1, 5, 6, 7, 8, 9, 11, 12, 13]: # Fog/Mist/Haze/Smoke
-        return "FG"
-    else:
-        return "NSW" # No Significant Weather
-
-def create_metar_style_string(now_series, dewpt_c, ceiling_ft, alt_icao="WXXX"):
-    """
-    Menggabungkan semua data menjadi string bergaya METAR/TAF.
-    Digunakan FCST (Forecast) karena ini adalah ramalan satu titik waktu.
-    """
-    
-    # 1. Tipe Laporan & Lokasi (Menggunakan FCST sesuai kesepakatan)
-    time_str = now_series.get('utc_datetime_dt').strftime("%d%H%MZ") if now_series.get('utc_datetime_dt') is not None else "XX0000Z"
-    report_type = "FCST" # Menggunakan FCST karena ini adalah ramalan satu titik waktu
-    
-    # 2. Angin (Direction & Speed)
-    wd_deg = now_series.get('wd_deg', 0)
-    ws_kt = now_series.get('ws_kt', 0.0)
-    wind_str = f"{int(wd_deg):03d}{int(round(ws_kt)):02d}KT"
-    if int(round(ws_kt)) < 3: # Kurang dari 3 KT adalah CALM (00000KT)
-        wind_str = "00000KT"
-        
-    # 3. Visibilitas (Meters)
-    vs_m = now_series.get('vs', 9999)
-    # Jika vis > 10000m, gunakan 9999 (standar METAR untuk >10km)
-    vis_str = "9999" if vs_m >= 10000 else f"{int(vs_m):04d}"
-    
-    # 4. Cuaca Signifikan (Present Weather)
-    wx_str = weather_code_to_metar(now_series.get('weather'))
-    
-    # 5. Awan/Ceiling
-    cloud_str = tcc_to_metar_cloud(now_series.get('tcc'), ceiling_ft)
-    
-    # 6. Suhu dan Titik Embun
-    temp_c = int(round(now_series.get('t', 0)))
-    dewpt_c_int = int(round(dewpt_c)) if dewpt_c is not None else 0
-    temp_str = f"{'M' if temp_c < 0 else ''}{abs(temp_c):02d}/{'M' if dewpt_c_int < 0 else ''}{abs(dewpt_c_int):02d}"
-    
-    # 7. QNH (Tidak ada di data BMKG, gunakan placeholder umum)
-    # QNH (Q) di BMKG tidak tersedia. Asumsi umum 1013hPa
-    qnh_str = "Q1013" 
-    
-    # 8. No Significant Change (NOSIG) / Tren (PROB/TEMPO)
-    # Karena ini hanyalah titik waktu ramalan, kita asumsikan NOSIG
-    trend_str = "NOSIG" #Placeholder
-    
-    metar_elements = [
-        report_type,
-        alt_icao,
-        time_str,
-        wind_str,
-        vis_str,
-        wx_str,
-        cloud_str,
-        temp_str,
-        qnh_str,
-        trend_str
-    ]
-    
-    # Bersihkan elemen kosong (misalnya jika wx_str kosong) dan gabungkan
-    return " ".join(filter(None, metar_elements))
+# **Fungsi-fungsi terkait FCST/METAR telah dihapus di sini**
+# **(tcc_to_metar_cloud, weather_code_to_metar, create_metar_style_string)**
 
 
 # =====================================
@@ -423,11 +329,11 @@ with st.sidebar:
     st.button("🔄 Fetch Data")
     st.markdown("---")
     # Kontrol Tampilan
-    show_metar = st.checkbox("Show FCST Style Report", value=True)
+    # show_metar (FCST Style Report) telah dihapus
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table (Raw Data)", value=False)
     # Kontrol baru untuk MET Report
-    show_qam_report = st.checkbox("Show MET Report (QAM)", value=False)
+    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
     st.markdown("---")
     st.caption("Data Source: BMKG API · Military Ops v2.2")
 
@@ -521,25 +427,12 @@ try:
     ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
     ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
 
-# =====================================
-# 🛫 FCST-STYLE REPORT (METAR SYNTAX)
-# =====================================
-    if show_metar:
-        metar_string = create_metar_style_string(now, dewpt, ceiling_est_ft, icao_code)
-        
-        st.markdown(f"""
-        <div class="metar-title">
-            <span style='color: #ffb300;'>{icao_code} FCST SNAPSHOT:</span> {now.get('local_datetime','—')} Local Time ({now.get('utc_datetime','—')} UTC)
-        </div>
-        <div class="metar-block">
-            {metar_string}
-        </div>
-        """, unsafe_allow_html=True)
+# **BLOK FCST-STYLE REPORT DIHILANGKAN DI SINI**
     
 # =====================================
 # ✈ FLIGHT WEATHER STATUS (KEY METRICS)
 # =====================================
-    st.markdown("---")
+    st.markdown("---") # Garis pemisah sebelum Key Metrics
     st.markdown('<div class="flight-card">', unsafe_allow_html=True)
     st.markdown('<div class="flight-title">✈ Key Meteorological Status</div>', unsafe_allow_html=True)
     
