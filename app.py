@@ -76,6 +76,26 @@ body {
         color-adjust: exact;
     }
 }
+
+/* Custom CSS for METAR Block */
+.metar-block {
+    background-color: #1a2a1f;
+    border: 1px solid #3f4f3f;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-family: 'Consolas', monospace;
+    font-size: 1.1rem;
+    color: #b6ff6d;
+    overflow-x: auto; /* Untuk METAR yang sangat panjang */
+}
+.metar-title {
+    color: #9adf4f;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
 </style>
 """
 
@@ -227,13 +247,15 @@ def ceiling_proxy_from_tcc(tcc_pct):
     if pd.isna(tcc_pct):
         return None, "Unknown"
     tcc = float(tcc_pct)
-    if tcc < 25:
-        return 3500, "SKC/FEW (>3000 ft)"
-    elif tcc < 50:
+    if tcc < 1: # 0% - SKC
+        return 99999, "SKC (Clear)"
+    elif tcc < 25: # 1-25% - FEW
+        return 3500, "FEW (>3000 ft)"
+    elif tcc < 50: # 25-50% - SCT
         return 2250, "SCT (1500-3000 ft)"
-    elif tcc < 75:
+    elif tcc < 75: # 50-75% - BKN
         return 1250, "BKN (1000-1500 ft)"
-    else:
+    else: # >75% - OVC
         return 800, "OVC (<1000 ft)"
 
 def classify_ifr_vfr(visibility_m, ceiling_ft):
@@ -242,14 +264,16 @@ def classify_ifr_vfr(visibility_m, ceiling_ft):
     """
     if visibility_m is None or pd.isna(visibility_m):
         return "Unknown"
-    vis = float(visibility_m)
+    vis_sm = float(visibility_m) / 1609.34 # Convert to Statute Miles (approximation)
     if ceiling_ft is None:
-        if vis >= 5000: return "VFR"
-        elif vis >= 3000: return "MVFR"
+        if vis_sm >= 3: return "VFR"
+        elif vis_sm >= 1: return "MVFR"
         else: return "IFR"
-    if vis >= 5000 and ceiling_ft > 1500: return "VFR"
-    if (3000 <= vis < 5000) or (1000 < ceiling_ft <= 1500): return "MVFR"
-    if vis < 3000 or ceiling_ft <= 1000: return "IFR"
+        
+    # Standard FAA/ICAO thresholds (approximate)
+    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR" # VFR
+    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR" # MVFR
+    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR" # IFR
     return "Unknown"
 
 def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
@@ -280,7 +304,7 @@ def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
 
 # Visual badge helper
 def badge_html(status):
-    if status == "VFR" or status == "Recommended":
+    if status == "VFR" or status == "Recommended" or status == "SKC (Clear)":
         return "<span class='badge-green'>OK</span>"
     if status == "MVFR" or status == "Caution":
         return "<span class='badge-yellow'>CAUTION</span>"
@@ -288,17 +312,119 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
+def tcc_to_metar_cloud(tcc_pct, ceiling_ft):
+    """
+    Konversi TCC (Total Cloud Cover) ke format METAR.
+    """
+    if pd.isna(tcc_pct):
+        return "NSC" # No Significant Clouds
+    tcc = float(tcc_pct)
+    # Konversi kaki ke ratusan kaki untuk METAR
+    ceiling_hft = int(round((ceiling_ft or 99999) / 100.0))
+    ceiling_str = f"{ceiling_hft:03d}" if ceiling_hft <= 999 else "///" # Max 999
+    
+    if tcc < 1:
+        return "SKC" # Sky Clear
+    elif tcc < 25:
+        return f"FEW{ceiling_str}"
+    elif tcc < 50:
+        return f"SCT{ceiling_str}"
+    elif tcc < 75:
+        return f"BKN{ceiling_str}"
+    else:
+        return f"OVC{ceiling_str}"
+
+def weather_code_to_metar(wx_code):
+    """
+    Proxy konversi kode cuaca BMKG ke kode METAR.
+    Asumsi: BMKG menggunakan 0-45 untuk cuaca, kita fokus pada yang signifikan.
+    """
+    if pd.isna(wx_code):
+        return ""
+    code = int(wx_code)
+    # Fokus pada Rain (RA), Thunderstorm (TS), dan Fog/Haze (FG/HZ)
+    if code in [2, 3, 4, 10, 60, 61, 63, 65, 80]: # Rain/Light Rain/Shower
+        return "RA"
+    elif code in [90, 95, 97]: # Thunderstorm/T-Storm w/ Rain
+        return "TSRA"
+    elif code in [1, 5, 6, 7, 8, 9, 11, 12, 13]: # Fog/Mist/Haze/Smoke
+        return "FG"
+    else:
+        return "NSW" # No Significant Weather
+
+def create_metar_style_string(now_series, dewpt_c, ceiling_ft, alt_icao="WXXX"):
+    """
+    Menggabungkan semua data menjadi string bergaya METAR/TAF.
+    Ini adalah ramalan, bukan observasi resmi METAR.
+    """
+    
+    # 1. Tipe Laporan & Lokasi (Diasumsikan TAF Style karena ini adalah ramalan)
+    # Catatan: TAF memiliki periode validitas, tapi kita hanya menggunakan satu titik waktu ramalan
+    time_str = now_series.get('utc_datetime_dt').strftime("%d%H%MZ") if now_series.get('utc_datetime_dt') is not None else "XX0000Z"
+    report_type = "TAF" # Menggunakan TAF karena ini adalah ramalan
+    
+    # 2. Angin (Direction & Speed)
+    wd_deg = now_series.get('wd_deg', 0)
+    ws_kt = now_series.get('ws_kt', 0.0)
+    wind_str = f"{int(wd_deg):03d}{int(round(ws_kt)):02d}KT"
+    if int(round(ws_kt)) < 3: # Kurang dari 3 KT adalah CALM (00000KT)
+        wind_str = "00000KT"
+        
+    # 3. Visibilitas (Meters)
+    vs_m = now_series.get('vs', 9999)
+    # Jika vis > 10000m, gunakan 9999 (standar METAR untuk >10km)
+    vis_str = "9999" if vs_m >= 10000 else f"{int(vs_m):04d}"
+    
+    # 4. Cuaca Signifikan (Present Weather)
+    wx_str = weather_code_to_metar(now_series.get('weather'))
+    
+    # 5. Awan/Ceiling
+    cloud_str = tcc_to_metar_cloud(now_series.get('tcc'), ceiling_ft)
+    
+    # 6. Suhu dan Titik Embun
+    temp_c = int(round(now_series.get('t', 0)))
+    dewpt_c_int = int(round(dewpt_c)) if dewpt_c is not None else 0
+    temp_str = f"{'M' if temp_c < 0 else ''}{abs(temp_c):02d}/{'M' if dewpt_c_int < 0 else ''}{abs(dewpt_c_int):02d}"
+    
+    # 7. QNH (Tidak ada di data BMKG, gunakan placeholder umum)
+    # QNH (Q) di BMKG tidak tersedia. Asumsi umum 1013hPa
+    qnh_str = "Q1013" 
+    
+    # 8. No Significant Change (NOSIG) / Tren (PROB/TEMPO)
+    # Karena ini hanyalah titik waktu ramalan, kita asumsikan NOSIG
+    trend_str = "NOSIG" #Placeholder
+    
+    metar_elements = [
+        report_type,
+        alt_icao,
+        time_str,
+        wind_str,
+        vis_str,
+        wx_str,
+        cloud_str,
+        temp_str,
+        qnh_str,
+        trend_str
+    ]
+    
+    # Bersihkan elemen kosong (misalnya jika wx_str kosong) dan gabungkan
+    return " ".join(filter(None, metar_elements))
+
+
 # =====================================
 # 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
 # =====================================
 with st.sidebar:
     st.title("🛰️ Tactical Controls")
     adm1 = st.text_input("Province Code (ADM1)", value="32")
+    # Tambahkan input ICAO Code
+    icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
     st.button("🔄 Fetch Data")
     st.markdown("---")
     # Kontrol Tampilan
+    show_metar = st.checkbox("Show METAR Style Forecast", value=True)
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table", value=False)
     # Kontrol baru untuk MET Report
@@ -387,9 +513,30 @@ try:
     if df_sel.empty:
         st.warning("No data in selected time range.")
         st.stop()
-    
+        
     now = df_sel.iloc[0]
 
+    # prepare MET REPORT values (diperlukan untuk bagian di bawah dan QAM)
+    dewpt = estimate_dewpoint(now.get("t"), now.get("hu"))
+    dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
+    ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
+    ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
+
+# =====================================
+# 🛫 METAR-STYLE FORECAST (POIN 1)
+# =====================================
+    if show_metar:
+        metar_string = create_metar_style_string(now, dewpt, ceiling_est_ft, icao_code)
+        
+        st.markdown(f"""
+        <div class="metar-title">
+            <span style='color: #ffb300;'>{icao_code} TAF/FCST:</span> {now.get('local_datetime','—')} Local Time ({now.get('utc_datetime','—')} UTC)
+        </div>
+        <div class="metar-block">
+            {metar_string}
+        </div>
+        """, unsafe_allow_html=True)
+    
 # =====================================
 # ✈ FLIGHT WEATHER STATUS (KEY METRICS)
 # =====================================
@@ -420,13 +567,6 @@ try:
 # =====================================
 # ☁ METEOROLOGICAL DETAILS (SECONDARY) - REVISI
 # =====================================
-    # prepare MET REPORT values (diperlukan untuk bagian di bawah dan QAM)
-    dewpt = estimate_dewpoint(now.get("t"), now.get("hu"))
-    dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
-    ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
-    ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None else "—"
-
-
     st.markdown('<div class="flight-card">', unsafe_allow_html=True)
     st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
 
@@ -506,8 +646,8 @@ try:
         # prepare MET REPORT values
         visibility_m = now.get('vs')
         wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
-        wind_variation = "Not available (BMKG Forecast)" 
-        ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None else "—"
+        wind_variation = "Not available (BMKG Forecast)"  
+        ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
 
 
         # 📌 START: MEMBANGUN HTML UNTUK LAPORAN QAM
@@ -523,7 +663,7 @@ try:
                 </tr>
                 <tr>
                     <th>AERODROME IDENTIFICATION</th>
-                    <td>{now.get('kotkab','—')} ({now.get('adm2','—')})</td>
+                    <td>{icao_code} / {now.get('kotkab','—')} ({now.get('adm2','—')})</td>
                 </tr>
                 <tr>
                     <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
@@ -552,18 +692,18 @@ try:
                 <tr>
                     <th>QNH</th>
                     <td>
-                        .................. mbs<br>
-                        .................. ins*<br>
-                        .................. mm Hg*
+                        ................. mbs<br>
+                        ................. ins*<br>
+                        ................. mm Hg*
                         <span style='font-size: 0.75rem; color:#777;'> (Barometric Data not available from Source)</span>
                     </td>
                 </tr>
                 <tr>
                     <th>QFE*</th>
                     <td>
-                        .................. mbs<br>
-                        .................. ins*<br>
-                        .................. mm Hg*
+                        ................. mbs<br>
+                        ................. ins*<br>
+                        ................. mm Hg*
                     </td>
                 </tr>
                 <tr>
@@ -649,7 +789,7 @@ try:
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
             
             # PERBAIKAN: Menghapus observed=True
-            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True) 
+            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)  
             
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
