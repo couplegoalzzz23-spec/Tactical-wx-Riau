@@ -355,13 +355,12 @@ def weather_code_to_metar(wx_code):
 def create_metar_style_string(now_series, dewpt_c, ceiling_ft, alt_icao="WXXX"):
     """
     Menggabungkan semua data menjadi string bergaya METAR/TAF.
-    Ini adalah ramalan, bukan observasi resmi METAR.
+    Digunakan FCST (Forecast) karena ini adalah ramalan satu titik waktu.
     """
     
-    # 1. Tipe Laporan & Lokasi (Diasumsikan TAF Style karena ini adalah ramalan)
-    # Catatan: TAF memiliki periode validitas, tapi kita hanya menggunakan satu titik waktu ramalan
+    # 1. Tipe Laporan & Lokasi (Menggunakan FCST sesuai kesepakatan)
     time_str = now_series.get('utc_datetime_dt').strftime("%d%H%MZ") if now_series.get('utc_datetime_dt') is not None else "XX0000Z"
-    report_type = "TAF" # Menggunakan TAF karena ini adalah ramalan
+    report_type = "FCST" # Menggunakan FCST karena ini adalah ramalan satu titik waktu
     
     # 2. Angin (Direction & Speed)
     wd_deg = now_series.get('wd_deg', 0)
@@ -424,9 +423,9 @@ with st.sidebar:
     st.button("🔄 Fetch Data")
     st.markdown("---")
     # Kontrol Tampilan
-    show_metar = st.checkbox("Show METAR Style Forecast", value=True)
+    show_metar = st.checkbox("Show FCST Style Report", value=True)
     show_map = st.checkbox("Show Map", value=True)
-    show_table = st.checkbox("Show Table", value=False)
+    show_table = st.checkbox("Show Table (Raw Data)", value=False)
     # Kontrol baru untuk MET Report
     show_qam_report = st.checkbox("Show MET Report (QAM)", value=False)
     st.markdown("---")
@@ -523,14 +522,14 @@ try:
     ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
 
 # =====================================
-# 🛫 METAR-STYLE FORECAST (POIN 1)
+# 🛫 FCST-STYLE REPORT (METAR SYNTAX)
 # =====================================
     if show_metar:
         metar_string = create_metar_style_string(now, dewpt, ceiling_est_ft, icao_code)
         
         st.markdown(f"""
         <div class="metar-title">
-            <span style='color: #ffb300;'>{icao_code} TAF/FCST:</span> {now.get('local_datetime','—')} Local Time ({now.get('utc_datetime','—')} UTC)
+            <span style='color: #ffb300;'>{icao_code} FCST SNAPSHOT:</span> {now.get('local_datetime','—')} Local Time ({now.get('utc_datetime','—')} UTC)
         </div>
         <div class="metar-block">
             {metar_string}
