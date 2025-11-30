@@ -510,7 +510,7 @@ try:
     <div class="met-report-container">
         <div class="met-report-header">MARKAS BESAR ANGKATAN UDARA</div>
         <div class="met-report-subheader">DINAS PENGEMBANGAN OPERASI</div>
-        <div class="met-report-header" style="border-top: none;">METEOROLOGICAL REPORT FOR TAE OFF AND LANDING</div>
+        <div class="met-report-header" style="border-top: none;">METEOROLOGICAL REPORT FOR TAKE OFF AND LANDING</div>
         <table class="met-report-table">
             <tr>
                 <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
