@@ -198,6 +198,7 @@ hr, .stDivider {
 # =====================================
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384 # konversi ke knot
+METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
 
 # =====================================
 # 🧰 UTILITAS
@@ -243,6 +244,15 @@ def ceiling_proxy_from_tcc(tcc_pct):
     """
     Proxy estimate for ceiling (feet) using cloud cover percentage.
     Returns estimated ceiling category in feet (median of category) and as label.
+    
+    Tabel konversi proxy yang digunakan:
+    Tutupan Awan (tcc %) | Label Penerbangan | Estimasi Ketinggian Dasar (Feet) | Status (Proxy)
+    ---------------------|-------------------|----------------------------------|----------------
+    tcc < 1%             | SKC (Clear)       | 99999 ft (Tidak membatasi)       | VFR
+    1% <= tcc < 25%      | FEW (Few)         | 3500 ft (Median)                 | VFR
+    25% <= tcc < 50%     | SCT (Scattered)   | 2250 ft (Median)                 | MVFR/VFR
+    50% <= tcc < 75%     | BKN (Broken)      | 1250 ft (Median)                 | IFR/MVFR
+    tcc >= 75%           | OVC (Overcast)    | 800 ft (Median Rendah)           | IFR
     """
     if pd.isna(tcc_pct):
         return None, "Unknown"
@@ -257,6 +267,33 @@ def ceiling_proxy_from_tcc(tcc_pct):
         return 1250, "BKN (1000-1500 ft)"
     else: # >75% - OVC
         return 800, "OVC (<1000 ft)"
+
+def convert_vis_to_sm(visibility_m):
+    """
+    Convert visibility in meters (m) to Statute Miles (SM).
+    Returns string representation.
+    """
+    if pd.isna(visibility_m) or visibility_m is None:
+        return "—"
+    try:
+        vis_m = float(visibility_m)
+        vis_sm = vis_m * METER_TO_SM
+        # Use simple fraction/mixed number representation for visibility common in aviation
+        if vis_sm < 1:
+            # Example: 0.5 SM
+            return f"{vis_sm:.1f} SM"
+        elif vis_sm < 5:
+            # Example: 1 1/2 SM
+            # Simple way to check for half mile (0.5)
+            if (vis_sm * 2) % 2 == 0: # Integer miles
+                return f"{int(vis_sm)} SM"
+            else:
+                return f"{vis_sm:.1f} SM" # Keep 1 decimal for simplicity in this case
+        else:
+            # For 5 SM and above, integer miles usually suffice
+            return f"{int(round(vis_sm))} SM"
+    except ValueError:
+        return "—"
 
 def classify_ifr_vfr(visibility_m, ceiling_ft):
     """
@@ -311,9 +348,6 @@ def badge_html(status):
     if status == "IFR" or status == "Not Recommended":
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
-
-# **Fungsi-fungsi terkait FCST/METAR telah dihapus di sini**
-# **(tcc_to_metar_cloud, weather_code_to_metar, create_metar_style_string)**
 
 
 # =====================================
@@ -426,8 +460,10 @@ try:
     dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
     ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
     ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
+    
+    # NEW: Konversi Visibilitas ke Statute Miles
+    vis_sm_disp = convert_vis_to_sm(now.get('vs'))
 
-# **BLOK FCST-STYLE REPORT DIHILANGKAN DI SINI**
     
 # =====================================
 # ✈ FLIGHT WEATHER STATUS (KEY METRICS)
@@ -446,9 +482,9 @@ try:
         st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
     with colC:
-        st.markdown("<div class='metric-label'>Visibility (M)</div>", unsafe_allow_html=True)
+        st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
     with colD:
         st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
@@ -488,7 +524,7 @@ try:
         st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
         col_prov, col_city = st.columns(2)
         with col_prov:
-            st.markdown("<div class='metric-label'>Province</div>", unsafe_allow_html=True)
+            st.markdown("<div classs='metric-label'>Province</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
         with col_city:
             st.markdown("<div class='metric-label'>City/Regency</div>", unsafe_allow_html=True)
@@ -500,9 +536,9 @@ try:
         # Row 1: Visibility & Ceiling
         col_vis, col_ceil = st.columns(2)
         with col_vis:
-            st.markdown("<div class='metric-label'>Visibility (Metres)</div>", unsafe_allow_html=True)
+            st.markdown("<div class='metric-label'>Visibility (Metres/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
             st.markdown(f"<div class='detail-value'>{now.get('vs','—')} m</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='small-note'>{now.get('vs_text','—')}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
         with col_ceil:
             st.markdown("<div class='metric-label'>Est. Ceiling Base</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value'>{ceiling_display}</div>", unsafe_allow_html=True)
@@ -563,8 +599,7 @@ try:
                 </tr>
                 <tr>
                     <th>HORIZONTAL VISIBILITY</th>
-                    <td>{visibility_m} m ({now.get('vs_text','—')})</td>
-                </tr>
+                    <td>{visibility_m} m ({vis_sm_disp}) / {now.get('vs_text','—')}</td> </tr>
                 <tr>
                     <th>RUNWAY VISUAL RANGE</th>
                     <td>— (RVR not available)</td>
@@ -680,16 +715,13 @@ try:
             labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
             
-            # PERBAIKAN: Menghapus observed=True
             df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)  
             
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
             
-            # PERBAIKAN: Menghapus observed=True
             df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
             
-            # PERBAIKAN: Menghapus observed=True dari groupby
             freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
             
             freq["percent"] = freq["count"]/freq["count"].sum()*100
