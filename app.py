@@ -1,912 +1,167 @@
 import streamlit as st
-import requests
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
 # =====================================
-# ⚙️ KONFIGURASI DASAR
+# ⚙️ KONFIGURASI APP
 # =====================================
-st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
+st.set_page_config(page_title="Wind Analysis Dashboard", layout="wide")
 
-# =====================================
-# 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL + MET REPORT TABLE
-# =====================================
+st.title("🌬️ Tactical Wind Analysis Dashboard")
 
-# Menyimpan CSS styling untuk digunakan dalam file HTML QAM yang diunduh
-CSS_STYLES = """
-<style>
-/* Base theme */
-body {
-    background-color: #0b0c0c;
-    color: #cfd2c3;
-    font-family: "Consolas", "Roboto Mono", monospace;
-}
-/* Custom CSS for the MET REPORT TABLE (REVISED QAM FORMAT) */
-.met-report-table {
-    border: 1px solid #2b3c2b;
-    width: 100%;
-    margin-bottom: 20px;
-    background-color: #0f1111;
-    font-size: 0.95rem;
-    border-collapse: collapse;
-}
-.met-report-table th, .met-report-table td {
-    border: 1px solid #2b3c2b;
-    padding: 8px;
-    text-align: left;
-    vertical-align: top;
-}
-.met-report-table th {
-    background-color: #111;
-    color: #a9df52;
-    text-transform: uppercase;
-    width: 45%;
-    font-size: 0.85rem;
-}
-.met-report-table td {
-    color: #dfffe0;
-    width: 55%;
-    font-weight: bold;
-}
-.met-report-header {
-    text-align: center;
-    background-color: #0b0c0c;
-    color: #a9df52;
-    font-weight: bold;
-    font-size: 1.1rem;
-    padding: 10px 0;
-    border: 1px solid #2b3c2b;
-    border-bottom: none;
-}
-.met-report-subheader {
-    text-align: center;
-    background-color: #0b0c0c;
-    color: #cfd2c3;
-    font-weight: normal;
-    font-size: 0.8rem;
-    padding-bottom: 5px;
-}
-/* Print styles untuk memastikan warna tetap muncul saat cetak ke PDF */
-@media print {
-    body {
-        -webkit-print-color-adjust: exact;
-        color-adjust: exact;
-    }
-}
 
-/* Custom CSS for METAR Block (Dihapus dari skrip utama, namun CSS-nya tetap di sini) */
-.metar-block {
-    background-color: #1a2a1f;
-    border: 1px solid #3f4f3f;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    font-family: 'Consolas', monospace;
-    font-size: 1.1rem;
-    color: #b6ff6d;
-    overflow-x: auto; /* Untuk METAR yang sangat panjang */
-}
-.metar-title {
-    color: #9adf4f;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-}
-
-</style>
-"""
-
-# Menyuntikkan seluruh CSS ke Streamlit (termasuk yang tidak relevan untuk QAM, untuk tampilan dashboard)
-st.markdown(CSS_STYLES + """
-<style>
-/* CSS Streamlit Khusus */
-h1, h2, h3, h4 {
-    color: #a9df52;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-section[data-testid="stSidebar"] {
-    background-color: #111;
-    color: #d0d3ca;
-}
-.stButton>button {
-    background-color: #1a2a1f;
-    color: #a9df52;
-    border: 1px solid #3f4f3f;
-    border-radius: 8px;
-    font-weight: bold;
-}
-/* ... (lanjutan CSS Streamlit) ... */
-.radar {
-  position: relative;
-  width: 160px;
-  height: 160px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(20,255,50,0.05) 20%, transparent 21%),
-              radial-gradient(circle, rgba(20,255,50,0.1) 10%, transparent 11%);
-  background-size: 20px 20px;
-  border: 2px solid #33ff55;
-  overflow: hidden;
-  margin: auto;
-  box-shadow: 0 0 20px #33ff55;
-}
-.radar:before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0;
-  width: 50%; height: 2px;
-  background: linear-gradient(90deg, #33ff55, transparent);
-  transform-origin: 100% 50%;
-  animation: sweep 2.5s linear infinite;
-}
-@keyframes sweep {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-hr, .stDivider {
-    border-top: 1px solid #2f3a2f;
-}
-.flight-card {
-    padding: 20px 24px;
-    background-color: #0f1111;
-    border: 1px solid #2b3c2b;
-    border-radius: 10px;
-    margin-bottom: 22px;
-}
-.flight-title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #9adf4f;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 14px;
-}
-.metric-label {
-    font-size: 0.70rem;
-    text-transform: uppercase;
-    color: #9fa8a0;
-    letter-spacing: 0.6px;
-    margin-bottom: -6px;
-}
-.metric-value {
-    font-size: 1.9rem;
-    color: #b6ff6d;
-    margin-top: -6px;
-    font-weight: 700;
-}
-.small-note {
-    font-size: 0.78rem;
-    color: #9fa8a0;
-}
-.badge-green { color:#002b00; background:#b6ff6d; padding:4px 8px; border-radius:6px; font-weight:700; }
-.badge-yellow { color:#4a3b00; background:#ffd86b; padding:4px 8px; border-radius:6px; font-weight:700; }
-.badge-red { color:#2b0000; background:#ff6b6b; padding:4px 8px; border-radius:6px; font-weight:700; }
-.detail-value {
-    font-size: 1.2rem;
-    color: #dfffe0;
-    font-weight: bold;
-}
-
-/* Wind Vector SVG container */
-.wind-vector {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:12px;
-}
-.wind-svg {
-  width:140px;
-  height:140px;
-  display:block;
-  transform-origin:center center;
-}
-.wind-legend {
-  font-size:0.9rem;
-  color:#dfffe0;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# =====================================
-# 📡 KONFIGURASI API
-# =====================================
-API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384 # konversi ke knot
-METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
-
-# =====================================
-# 🧰 UTILITAS
-# =====================================
-# CACHE: flatten_cuaca_entry bisa expensive jika dipanggil berulang — cache hasilnya per entry (hashable key: adm1+timestamp)
-@st.cache_data(ttl=300)
-def fetch_forecast(adm1: str):
-    params = {"adm1": adm1}
-    resp = requests.get(API_BASE, params=params, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-# cache flattening per-entry id to avoid repeated heavy parsing
-@st.cache_data(ttl=300)
-def flatten_cuaca_entry_cached(entry_serialized):
-    """
-    Wrapper expects a hashable serialization (e.g., str(entry)) to cache.
-    """
-    entry = pd.read_json(entry_serialized, orient="records")[0] if isinstance(entry_serialized, str) and entry_serialized.startswith("[") else entry_serialized
-    return flatten_cuaca_entry_core(entry)
-
-def flatten_cuaca_entry_core(entry):
-    rows = []
-    lokasi = entry.get("lokasi", {})
-    for group in entry.get("cuaca", []):
-        for obs in group:
-            r = obs.copy()
-            r.update({
-                "adm1": lokasi.get("adm1"),
-                "adm2": lokasi.get("adm2"),
-                "provinsi": lokasi.get("provinsi"),
-                "kotkab": lokasi.get("kotkab"),
-                "lon": lokasi.get("lon"),
-                "lat": lokasi.get("lat"),
-            })
-            # safe datetime parse
-            r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
-            r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
-            rows.append(r)
-    df = pd.DataFrame(rows)
-    # vectorize numeric conversion
-    numcols = [c for c in ["t","tcc","tp","wd_deg","ws","hu","vs","ws_kt"] if c in df.columns]
-    if numcols:
-        df[numcols] = df[numcols].apply(pd.to_numeric, errors="coerce")
-    return df
-
-# Keep original name compatibility (non-cached) for fallback
-def flatten_cuaca_entry(entry):
-    # Use the cached wrapper when possible (serialize minimal)
+# ============================================================
+# 🎨 COLOR FUNCTION UNTUK WIND BARB BERDASARKAN KECEPATAN
+# ============================================================
+def wind_color(ws):
     try:
-        # We try to create a small serializable representation (only 'lokasi' and 'cuaca' to make key stable)
-        serial = pd.io.json.dumps({"lokasi": entry.get("lokasi", {}), "cuaca": entry.get("cuaca", [])})
-        return flatten_cuaca_entry_cached(serial)
-    except Exception:
-        return flatten_cuaca_entry_core(entry)
+        ws = float(ws)
+    except:
+        return "white"
 
-def estimate_dewpoint(temp, rh):
-    if pd.isna(temp) or pd.isna(rh):
-        return None
-    # simple approximation
-    return temp - ((100 - rh) / 5)
+    if ws < 10:
+        return "lime"
+    elif ws < 20:
+        return "yellow"
+    elif ws < 30:
+        return "orange"
+    else:
+        return "red"
 
-def ceiling_proxy_from_tcc(tcc_pct):
-    """
-    Proxy estimate for ceiling (feet) using cloud cover percentage.
-    Returns estimated ceiling category in feet (median of category) and as label.
-    """
-    if pd.isna(tcc_pct):
-        return None, "Unknown"
-    tcc = float(tcc_pct)
-    if tcc < 1: # 0% - SKC
-        return 99999, "SKC (Clear)"
-    elif tcc < 25: # 1-25% - FEW
-        return 3500, "FEW (>3000 ft)"
-    elif tcc < 50: # 25-50% - SCT
-        return 2250, "SCT (1500-3000 ft)"
-    elif tcc < 75: # 50-75% - BKN
-        return 1250, "BKN (1000-1500 ft)"
-    else: # >75% - OVC
-        return 800, "OVC (<1000 ft)"
 
-def convert_vis_to_sm(visibility_m):
-    """
-    Convert visibility in meters (m) to Statute Miles (SM).
-    Returns string representation.
-    """
-    if pd.isna(visibility_m) or visibility_m is None:
-        return "—"
-    try:
-        vis_m = float(visibility_m)
-        vis_sm = vis_m * METER_TO_SM
-        # Use simple fraction/mixed number representation for visibility common in aviation
-        if vis_sm < 1:
-            return f"{vis_sm:.1f} SM"
-        elif vis_sm < 5:
-            if (vis_sm * 2) % 2 == 0:
-                return f"{int(vis_sm)} SM"
-            else:
-                return f"{vis_sm:.1f} SM"
-        else:
-            return f"{int(round(vis_sm))} SM"
-    except ValueError:
-        return "—"
+# ============================================================
+# 📌 PLOTLY WIND BARB TIME SERIES (ICAO/WMO Standard)
+# ============================================================
+def wind_barb_timeseries(df, speed_col="ws", dir_col="wd", time_col=None):
 
-def classify_ifr_vfr(visibility_m, ceiling_ft):
-    """
-    Classify into VFR / MVFR / IFR using conservative thresholds.
-    """
-    if visibility_m is None or pd.isna(visibility_m):
-        return "Unknown"
-    vis_sm = float(visibility_m) / 1609.34 # Convert to Statute Miles (approximation)
-    if ceiling_ft is None:
-        if vis_sm >= 3: return "VFR"
-        elif vis_sm >= 1: return "MVFR"
-        else: return "IFR"
-    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR"
-    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR"
-    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR"
-    return "Unknown"
+    if time_col is None:
+        x = df.index
+    else:
+        x = df[time_col]
 
-def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
-    """
-    Simple tactical recommendation rules (conservative).
-    """
-    rationale = []
-    takeoff = "Recommended"
-    landing = "Recommended"
-    if pd.notna(ws_kt) and float(ws_kt) >= 30:
-        takeoff = "Not Recommended"
-        landing = "Not Recommended"
-        rationale.append(f"High surface wind: {ws_kt:.1f} KT (>=30 KT limit)")
-    elif pd.notna(ws_kt) and float(ws_kt) >= 20:
-        rationale.append(f"Strong wind: {ws_kt:.1f} KT (>=20 KT advisory)")
-    if pd.notna(vs_m) and float(vs_m) < 1000:
-        landing = "Not Recommended"
-        rationale.append(f"Low visibility: {vs_m} m (<1000 m)")
-    if pd.notna(tp_mm) and float(tp_mm) >= 20:
-        takeoff = "Caution"
-        landing = "Caution"
-        rationale.append(f"Heavy accumulated rain: {tp_mm} mm (runway contamination possible)")
-    elif pd.notna(tp_mm) and float(tp_mm) > 5:
-        rationale.append(f"Moderate rainfall: {tp_mm} mm")
-    if not rationale:
-        rationale.append("Conditions within conservative operational limits.")
-    return takeoff, landing, rationale
+    # Hitung komponen U/V
+    U = df[speed_col] * np.sin(np.radians(df[dir_col]))
+    V = df[speed_col] * np.cos(np.radians(df[dir_col]))
 
-# Visual badge helper
-def badge_html(status):
-    if status == "VFR" or status == "Recommended" or status == "SKC (Clear)":
-        return "<span class='badge-green'>OK</span>"
-    if status == "MVFR" or status == "Caution":
-        return "<span class='badge-yellow'>CAUTION</span>"
-    if status == "IFR" or status == "Not Recommended":
-        return "<span class='badge-red'>NO-GO</span>"
-    return "<span class='badge-yellow'>UNKNOWN</span>"
+    colors = [wind_color(v) for v in df[speed_col]]
 
-# Additional util: compute wind vector components and headwind/crosswind vs runway
-def wind_components(ws_kt, wd_deg, rwy_heading_deg):
-    """
-    Compute headwind and crosswind components for a runway heading.
-    Positive headwind = headwind, negative = tailwind.
-    crosswind positive = from right, negative = from left.
-    """
-    try:
-        ws = float(ws_kt)
-        wd = float(wd_deg) % 360
-        rwy = float(rwy_heading_deg) % 360
-    except Exception:
-        return None, None
-    # Wind direction is where wind is coming from. Relative angle between wind and runway heading:
-    rel_angle = np.deg2rad((wd - rwy + 360) % 360)
-    # Headwind = ws * cos(rel_angle) (positive = headwind)
-    head = ws * np.cos(rel_angle)
-    # Crosswind = ws * sin(rel_angle) (positive = from right)
-    cross = ws * np.sin(rel_angle)
-    return head, cross
+    fig = go.Figure()
 
-# =====================================
-# 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
-# =====================================
-with st.sidebar:
-    st.title("🛰️ Tactical Controls")
-    adm1 = st.text_input("Province Code (ADM1)", value="32")
-    # Tambahkan input ICAO Code
-    icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
-    st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
-    st.button("🔄 Fetch Data")
-    st.markdown("---")
-    # Kontrol Tampilan
-    show_map = st.checkbox("Show Map", value=True)
-    show_table = st.checkbox("Show Table (Raw Data)", value=False)
-    # Kontrol baru untuk MET Report
-    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
+    fig.add_trace(go.Barbs(
+        x=x,
+        y=[0] * len(df),
+        u=U,
+        v=V,
+        barbcolor=colors,
+        sizeref=0.8,
+        showscale=False,
+        name="Wind Barbs"
+    ))
 
-    # NEW: Optional runway heading for crosswind/headwind computation (user can enter runway true heading)
-    st.markdown("---")
-    st.caption("Optional: runway heading for headwind/crosswind calc")
-    runway_heading = st.number_input("Runway Heading (deg)", value=90, min_value=0, max_value=360, step=1, help="Enter runway magnetic/true heading in degrees (e.g., 090)")
+    fig.update_layout(
+        height=250,
+        title="Wind Barb Time Series (ICAO Standard)",
+        xaxis_title="Time",
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+        margin=dict(l=10, r=10, t=40, b=10),
+        paper_bgcolor="black",
+        plot_bgcolor="black",
+        font=dict(color="white")
+    )
 
-    st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v2.2")
+    return fig
 
-# =====================================
-# 📡 LOAD DATA
-# =====================================
-st.title("Tactical Weather Operations Dashboard")
-st.markdown("*Source: BMKG Forecast API — Live Data*")
 
-# BLOK TRY DIMULAI DI SINI
-try:
-    with st.spinner("🛰️ Acquiring weather intelligence..."):
-        raw = fetch_forecast(adm1)
-        
-    entries = raw.get("data", [])
-    if not entries:
-        st.warning("No forecast data available.")
+# ============================================================
+# 🔧 SIMULASI DATA (Jika Anda punya file real, tinggal ganti)
+# ============================================================
+st.sidebar.subheader("Data Options")
+
+use_demo = st.sidebar.checkbox("Use Demo Wind Data", value=True)
+
+if use_demo:
+    # Generate 24 jam data
+    time_index = pd.date_range(datetime.now().replace(hour=0, minute=0), periods=24, freq="H")
+
+    np.random.seed(42)
+    df = pd.DataFrame({
+        "time": time_index,
+        "ws": np.random.randint(2, 35, size=24),                 # wind speed
+        "wd": np.random.randint(0, 360, size=24),                # wind direction
+    })
+else:
+    uploaded = st.sidebar.file_uploader("Upload CSV (time, ws, wd)", type=["csv"])
+    if uploaded:
+        df = pd.read_csv(uploaded)
+    else:
+        st.warning("Upload data atau gunakan demo data.")
         st.stop()
 
-    mapping = {}
-    for e in entries:
-        lok = e.get("lokasi", {})
-        label = lok.get("kotkab") or lok.get("adm2") or f"Location {len(mapping)+1}"
-        mapping[label] = {"entry": e}
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
-    with col2:
-        st.metric("📍 Locations", len(mapping))
-
-    selected_entry = mapping[loc_choice]["entry"]
-    # Use the cached flatten; we serialize only small parts inside flatten to keep stable key
-    df = flatten_cuaca_entry(selected_entry)
-
-    if df.empty:
-        st.warning("No valid weather data found.")
-        st.stop()
-
-    # compute ws_kt if not already present
-    if "ws_kt" not in df.columns:
-        df["ws_kt"] = df["ws"] * MS_TO_KT
-    else:
-        df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
-
-# =====================================
-# 🕓 SLIDER WAKTU
-# =====================================
-    # Find the correct datetime column and set range
-    if "local_datetime_dt" in df.columns and df["local_datetime_dt"].notna().any():
-        df = df.sort_values("local_datetime_dt")
-        min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
-        max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
-        use_col = "local_datetime_dt"
-    elif "utc_datetime_dt" in df.columns and df["utc_datetime_dt"].notna().any():
-        df = df.sort_values("utc_datetime_dt")
-        min_dt = df["utc_datetime_dt"].dropna().min().to_pydatetime()
-        max_dt = df["utc_datetime_dt"].dropna().max().to_pydatetime()
-        use_col = "utc_datetime_dt"
-    else:
-        min_dt = 0
-        max_dt = len(df)-1
-        use_col = None
-
-    # slider only when datetime exists
-    if use_col:
-        # Memindahkan slider ke Sidebar
-        with st.sidebar:
-            start_dt = st.slider(
-                "Time Range",
-                min_value=min_dt,
-                max_value=max_dt,
-                # Set default range to cover only the first forecast time
-                value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt),
-                step=pd.Timedelta(hours=3),
-                format="HH:mm, MMM DD"
-            )
-        mask = (df[use_col] >= pd.to_datetime(start_dt[0])) & (df[use_col] <= pd.to_datetime(start_dt[1]))
-        df_sel = df.loc[mask].copy()
-    else:
-        df_sel = df.copy()
-
-    if df_sel.empty:
-        st.warning("No data in selected time range.")
-        st.stop()
-        
-    now = df_sel.iloc[0]
-
-    # prepare MET REPORT values (diperlukan untuk bagian di bawah dan QAM)
-    dewpt = estimate_dewpoint(now.get("t"), now.get("hu"))
-    dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
-    ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
-    ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
-    
-    # NEW: Konversi Visibilitas ke Statute Miles
-    vis_sm_disp = convert_vis_to_sm(now.get('vs'))
-
-    
-# =====================================
-# ✈ FLIGHT WEATHER STATUS (KEY METRICS) - (DENGAN WIND VECTOR)
-# =====================================
-    st.markdown("---") # Garis pemisah sebelum Key Metrics
-    st.markdown('<div class="flight-card">', unsafe_allow_html=True)
-    st.markdown('<div class="flight-title">✈ Key Meteorological Status</div>', unsafe_allow_html=True)
-    
-    # compute wind vector parameters
-    ws_kt_val = now.get('ws_kt', None)
-    wd_deg_val = now.get('wd_deg', None)
-    # ensure numeric
-    try:
-        ws_kt_num = float(ws_kt_val) if ws_kt_val is not None and not pd.isna(ws_kt_val) else None
-    except Exception:
-        ws_kt_num = None
-    try:
-        wd_deg_num = float(wd_deg_val) if wd_deg_val is not None and not pd.isna(wd_deg_val) else None
-    except Exception:
-        wd_deg_num = None
-
-    # Headwind / crosswind using user-provided runway_heading
-    headwind, crosswind = wind_components(ws_kt_num, wd_deg_num, runway_heading) if (ws_kt_num is not None and wd_deg_num is not None) else (None, None)
-
-    colA, colB, colC, colD = st.columns(4)
-    with colA:
-        st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
-        st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
-    with colB:
-        # Wind numeric
-        st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{ws_kt_num if ws_kt_num is not None else '—'}{'' if ws_kt_num is None else ' KT'}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{wd_deg_num if wd_deg_num is not None else '—'}°</div>", unsafe_allow_html=True)
-
-        # Wind vector visual (small SVG) and numeric breakdown
-        # Build SVG arrow: length scaled from ws_kt (cap at 40 KT visually) and rotate by wind direction (wind from)
-        if ws_kt_num is not None and wd_deg_num is not None:
-            # Scale length (max visual length 60)
-            max_display_speed = 40.0
-            length_px = max(20, min(60, int((ws_kt_num / max_display_speed) * 60)))
-            # SVG: arrow pointing up (0deg) and rotated by wd_deg_num (wind from). We rotate to point from where wind comes.
-            svg = f"""
-            <div class='wind-vector'>
-              <svg class='wind-svg' viewBox='0 0 140 140' preserveAspectRatio='xMidYMid meet'>
-                <g transform="translate(70,70) rotate({wd_deg_num})">
-                  <line x1="0" y1="0" x2="0" y2="-{length_px}" stroke="#b6ff6d" stroke-width="4" stroke-linecap="round" />
-                  <polygon points="0,-{length_px-8} -6,-{length_px-0} 6,-{length_px-0}" fill="#b6ff6d"/>
-                  <!-- tail feathers -->
-                  <line x1="0" y1="-{length_px/3}" x2="-12" y2="-{length_px/3 + 8}" stroke="#b6ff6d" stroke-width="3" />
-                  <line x1="0" y1="-{length_px/2}" x2="12" y2="-{length_px/2 + 8}" stroke="#b6ff6d" stroke-width="3" />
-                </g>
-              </svg>
-              <div class='wind-legend'>
-                <div><strong>Vector:</strong> {wd_deg_num:.0f}° from / {ws_kt_num:.1f} KT</div>
-                <div>Headwind: {f'{headwind:.1f} KT' if headwind is not None else '—'}</div>
-                <div>Crosswind: {f'{abs(crosswind):.1f} KT'} ({'from right' if crosswind is not None and crosswind>0 else 'from left' if crosswind is not None else '—'})</div>
-                <div style="font-size:0.8rem; color:#9fa8a0; margin-top:6px;">Runway heading used: {int(runway_heading):03d}°</div>
-              </div>
-            </div>
-            """
-            st.markdown(svg, unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='small-note'>Wind vector not available</div>", unsafe_allow_html=True)
-
-    with colC:
-        st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True)
-    with colD:
-        st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>Rain: {now.get('tp',0):.1f} mm (Accum.)</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+df_display = df.copy()
+df_display["time"] = df_display["time"].astype(str)
+st.dataframe(df_display, hide_index=True)
 
 
-# =====================================
-# ☁ METEOROLOGICAL DETAILS (SECONDARY) - REVISI
-# =====================================
-    st.markdown('<div class="flight-card">', unsafe_allow_html=True)
-    st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
+# ============================================================
+# 📈 PANEL: WIND SPEED TREND
+# ============================================================
+st.subheader("📈 Wind Speed Trend (KT)")
 
-    detail_col1, detail_col2 = st.columns(2)
+fig_speed = go.Figure()
+fig_speed.add_trace(go.Scatter(
+    x=df["time"], 
+    y=df["ws"],
+    mode="lines+markers",
+    line=dict(color="cyan"),
+    name="Wind Speed"
+))
 
-    with detail_col1:
-        st.markdown("##### 🌡️ Atmospheric State")
-        # Row 1: Temperature & Dew Point
-        col_t, col_dp = st.columns(2)
-        with col_t:
-            st.markdown("<div class='metric-label'>Air Temperature (°C)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{now.get('t','—')}°C</div>", unsafe_allow_html=True)
-        with col_dp:
-            st.markdown("<div class='metric-label'>Dew Point (Est)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{dewpt_disp}</div>", unsafe_allow_html=True)
+fig_speed.update_layout(
+    height=250,
+    paper_bgcolor="black",
+    plot_bgcolor="black",
+    font=dict(color="white"),
+    margin=dict(l=10, r=10, t=40, b=10)
+)
 
-        # Row 2: Humidity & Wind Dir Code
-        col_hu, col_wd = st.columns(2)
-        with col_hu:
-            st.markdown("<div class='metric-label'>Relative Humidity (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{now.get('hu','—')}%</div>", unsafe_allow_html=True)
-        with col_wd:
-            st.markdown("<div class='metric-label'>Wind Direction (Code)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{now.get('wd','—')} ({now.get('wd_deg','—')}°)</div>", unsafe_allow_html=True)
-        
-        # Row 3: Location Details (Moved here)
-        st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-        col_prov, col_city = st.columns(2)
-        with col_prov:
-            st.markdown("<div classs='metric-label'>Province</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
-        with col_city:
-            st.markdown("<div class='metric-label'>City/Regency</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('kotkab','—')}</div>", unsafe_allow_html=True)
+st.plotly_chart(fig_speed, use_container_width=True)
 
 
-    with detail_col2:
-        st.markdown("##### 🌁 Sky and Visibility")
-        # Row 1: Visibility & Ceiling
-        col_vis, col_ceil = st.columns(2)
-        with col_vis:
-            st.markdown("<div class='metric-label'>Visibility (Metres/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
-            st.markdown(f"<div class='detail-value'>{now.get('vs','—')} m</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
-        with col_ceil:
-            st.markdown("<div class='metric-label'>Est. Ceiling Base</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{ceiling_display}</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='small-note'>({ceiling_label.split('(')[0].strip()})</div>", unsafe_allow_html=True)
+# ============================================================
+# 📈 PANEL: WIND DIRECTION TREND
+# ============================================================
+st.subheader("🧭 Wind Direction Trend (°)")
 
-        # Row 2: Cloud Cover & Weather Desc
-        col_tcc, col_wx = st.columns(2)
-        with col_tcc:
-            st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{now.get('tcc','—')}%</div>", unsafe_allow_html=True)
-        with col_wx:
-            st.markdown("<div class='metric-label'>Present Weather</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{now.get('weather_desc','—')} ({now.get('weather','—')})</div>", unsafe_allow_html=True)
-        
-        # Row 3: Time Index/Local Time
-        st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-        col_local, col_anal = st.columns(2)
-        with col_local:
-            st.markdown("<div class='metric-label'>Local Forecast Time</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('local_datetime','—')}</div>", unsafe_allow_html=True)
-        with col_anal:
-            st.markdown("<div class='metric-label'>Analysis Time (UTC)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('analysis_date','—')}</div>", unsafe_allow_html=True)
+fig_dir = go.Figure()
+fig_dir.add_trace(go.Scatter(
+    x=df["time"], 
+    y=df["wd"],
+    mode="lines+markers",
+    line=dict(color="orange"),
+    name="Wind Direction"
+))
+
+fig_dir.update_layout(
+    height=250,
+    paper_bgcolor="black",
+    plot_bgcolor="black",
+    font=dict(color="white"),
+    margin=dict(l=10, r=10, t=40, b=10)
+)
+
+st.plotly_chart(fig_dir, use_container_width=True)
 
 
-    st.markdown("</div>", unsafe_allow_html=True)
+# ============================================================
+# 🌬️ WIND BARB TIME SERIES (ICAO STANDARD)
+# ============================================================
+st.subheader("🌬️ Wind Barb Time Series (ICAO/WMO Standard)")
 
-# =====================================
-# === MET REPORT (QAM REPLICATION) - DIPINDAHKAN KE SIDEBAR
-# =====================================
-
-    if show_qam_report:
-        # prepare MET REPORT values
-        visibility_m = now.get('vs')
-        wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
-        wind_variation = "Not available (BMKG Forecast)"  
-        ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
+fig_wb = wind_barb_timeseries(df, speed_col="ws", dir_col="wd", time_col="time")
+st.plotly_chart(fig_wb, use_container_width=True)
 
 
-        # 📌 START: MEMBANGUN HTML UNTUK LAPORAN QAM
-        met_report_html_content = f"""
-        <div class="met-report-container">
-            <div class="met-report-header">MARKAS BESAR ANGKATAN UDARA</div>
-            <div class="met-report-subheader">DINAS PENGEMBANGAN OPERASI</div>
-            <div class="met-report-header" style="border-top: none;">METEOROLOGICAL REPORT FOR TAKE OFF AND LANDING</div>
-            <table class="met-report-table">
-                <tr>
-                    <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
-                    <td>{now.get('local_datetime','—')} (Local) / {now.get('utc_datetime','—')} (UTC)</td>
-                </tr>
-                <tr>
-                    <th>AERODROME IDENTIFICATION</th>
-                    <td>{icao_code} / {now.get('kotkab','—')} ({now.get('adm2','—')})</td>
-                </tr>
-                <tr>
-                    <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
-                    <td>{wind_info} / Variation: {wind_variation}</td>
-                </tr>
-                <tr>
-                    <th>HORIZONTAL VISIBILITY</th>
-                    <td>{visibility_m} m ({vis_sm_disp}) / {now.get('vs_text','—')}</td> </tr>
-                <tr>
-                    <th>RUNWAY VISUAL RANGE</th>
-                    <td>— (RVR not available)</td>
-                </tr>
-                <tr>
-                    <th>PRESENT WEATHER</th>
-                    <td>{now.get('weather_desc','—')} (Accum. Rain: {now.get('tp',0):.1f} mm)</td>
-                </tr>
-                <tr>
-                    <th>AMOUNT AND HEIGHT OF BASE OF LOW CLOUD</th>
-                    <td>Cloud Cover: {now.get('tcc','—')}% / {ceiling_full_desc}</td>
-                </tr>
-                <tr>
-                    <th>AIR TEMPERATURE AND DEW POINT TEMPERATURE</th>
-                    <td>Air Temp: {now.get('t','—')}°C / Dew Point: {dewpt_disp} / RH: {now.get('hu','—')}%</td>
-                </tr>
-                <tr>
-                    <th>QNH</th>
-                    <td>
-                        ................. mbs<br>
-                        ................. ins*<br>
-                        ................. mm Hg*
-                        <span style='font-size: 0.75rem; color:#777;'> (Barometric Data not available from Source)</span>
-                    </td>
-                </tr>
-                <tr>
-                    <th>QFE*</th>
-                    <td>
-                        ................. mbs<br>
-                        ................. ins*<br>
-                        ................. mm Hg*
-                    </td>
-                </tr>
-                <tr>
-                    <th>SUPPLEMENTARY INFORMATION</th>
-                    <td>{now.get('provinsi','—')} / Latitude: {now.get('lat','—')}, Longitude: {now.get('lon','—')}</td>
-                </tr>
-                <tr>
-                    <th>TIME OF ISSUE (UTC) / OBSERVER</th>
-                    <td>{now.get('utc_datetime','—')} / FCST ON DUTY</td>
-                </tr>
-            </table>
-        </div>
-        """
-        # 📌 END: MEMBANGUN HTML UNTUK LAPORAN QAM
-
-        # Menggabungkan CSS dan konten HTML untuk file yang diunduh
-        full_qam_html = f"<html><head>{CSS_STYLES}</head><body>{met_report_html_content}</body></html>"
-
-        st.markdown("---")
-        st.subheader("📝 Meteorological Report (QAM/Form Replication)")
-        st.markdown(met_report_html_content, unsafe_allow_html=True)
-        
-        # Implementasi tombol Download QAM
-        qam_filename = f"MET_REPORT_{loc_choice}_{now.get('local_datetime','—').replace(' ', '_').replace(':','')}.html"
-        st.download_button(
-            label="⬇ Download QAM Report (HTML)",
-            data=full_qam_html,
-            file_name=qam_filename,
-            mime="text/html",
-            help="Unduh laporan QAM sebagai file HTML. Buka di browser dan gunakan fungsi 'Cetak ke PDF' untuk konversi formal."
-        )
-        st.markdown("---")
-
-# =====================================
-# === DECISION MATRIX (KRUSIAL)
-# =====================================
-    ifr_vfr = classify_ifr_vfr(now.get("vs"), ceiling_est_ft)
-    takeoff_reco, landing_reco, reco_rationale = takeoff_landing_recommendation(now.get("ws_kt"), now.get("vs"), now.get("tp"))
-
-    st.markdown("---")
-    st.subheader("🔴 Operational Decision Matrix")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**Regulatory Category**")
-        ifr_badge = badge_html(ifr_vfr)
-        st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{ifr_badge}  <strong style='margin-left:8px;'>{ifr_vfr}</strong></div>", unsafe_allow_html=True)
-    with col2:
-        st.markdown("**Takeoff Recommendation**")
-        st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{badge_html(takeoff_reco)}  <strong style='margin-left:8px;'>{takeoff_reco}</strong></div>", unsafe_allow_html=True)
-    with col3:
-        st.markdown("**Landing Recommendation**")
-        st.markdown(f"<div style='padding:8px; border-radius:8px; background:#081108'>{badge_html(landing_reco)}  <strong style='margin-left:8px;'>{landing_reco}</strong></div>", unsafe_allow_html=True)
-
-    # Rationale / Notes
-    st.markdown("**Rationale / Notes:**")
-    for r in reco_rationale:
-        st.markdown(f"- {r}")
-    st.markdown("---")
-
-# =====================================
-# 📈 TRENDS
-# =====================================
-    st.subheader("📊 Parameter Trends")
-    c1, c2 = st.columns(2)
-    with c1:
-        # Use df_sel which is already sliced and smaller — avoids re-indexing entire df
-        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
-        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
-    with c2:
-        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind (KT)"), use_container_width=True)
-        st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
-
-# =====================================
-# 🌪️ WINDROSE (ASLI)
-# =====================================
-    st.markdown("---")
-    st.subheader("🌪️ Windrose — Direction & Speed")
-    if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
-        df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
-        if not df_wr.empty:
-            # Pre-calc arrays for performance
-            bins_dir = np.arange(-11.25,360,22.5)
-            labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
-                          "S","SSW","SW","WSW","W","WNW","NW","NNW"]
-            
-            # Use vectorized modulo and cut
-            dir_vals = (df_wr["wd_deg"].astype(float) % 360).to_numpy()
-            df_wr = df_wr.assign(_dir = pd.cut(dir_vals, bins=bins_dir, labels=labels_dir, include_lowest=True))
-            
-            speed_bins = [0,5,10,20,30,50,100]
-            speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
-            df_wr = df_wr.assign(_speed = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True))
-            
-            freq = df_wr.groupby(["_dir","_speed"]).size().reset_index(name="count")
-            freq["percent"] = freq["count"]/freq["count"].sum()*100
-            az_map = {
-                "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
-                "SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,
-                "WNW":292.5,"NW":315,"NNW":337.5
-            }
-            freq["theta"] = freq["_dir"].map(az_map)
-            colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
-            fig_wr = go.Figure()
-            for i, sc in enumerate(speed_labels):
-                subset = freq[freq["_speed"]==sc]
-                if not subset.empty:
-                    fig_wr.add_trace(go.Barpolar(
-                        r=subset["percent"], theta=subset["theta"],
-                        name=f"{sc} KT", marker_color=colors[i], opacity=0.85
-                    ))
-            fig_wr.update_layout(
-                title="Windrose (KT)",
-                polar=dict(
-                    angularaxis=dict(direction="clockwise", rotation=90, tickvals=list(range(0,360,45))),
-                    radialaxis=dict(ticksuffix="%", showline=True, gridcolor="#333")
-                ),
-                legend_title="Wind Speed Class",
-                template="plotly_dark"
-            )
-            st.plotly_chart(fig_wr, use_container_width=True)
-        else:
-            st.info("Insufficient wind data for Windrose plot.")
-    else:
-        st.info("Wind data (wd_deg, ws_kt) not available in dataset for windrose.")
-
-# =====================================
-# 🗺️ MAP
-# =====================================
-    if show_map:
-        st.markdown("---")
-        st.subheader("🗺️ Tactical Map")
-        try:
-            lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
-            lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
-            st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
-        except Exception as e:
-            st.warning(f"Map unavailable: {e}")
-
-# =====================================
-# 📋 TABLE
-# =====================================
-    if show_table:
-        st.markdown("---")
-        st.subheader("📋 Forecast Table")
-        st.dataframe(df_sel)
-
-# =====================================
-# 💾 EXPORT
-# =====================================
-    st.markdown("---")
-    st.subheader("💾 Export Data")
-    # Tombol download QAM sudah dipindahkan ke dalam blok show_qam_report di atas.
-    csv = df_sel.to_csv(index=False)
-    json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
-    colA, colB = st.columns(2)
-    with colA:
-        st.download_button("⬇ CSV", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
-    with colB:
-        st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
-
-
-# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY
-except requests.exceptions.HTTPError as e:
-    st.error(f"API Error: Could not fetch data. Check Province Code (ADM1). Status code: {e.response.status_code}")
-except requests.exceptions.ConnectionError:
-    st.error("Connection Error: Could not connect to BMKG API.")
-except Exception as e:
-    # Error ini akan menangkap error lain yang tidak terduga.
-    st.error(f"An unexpected error occurred: {e}")
-
-# =====================================
-# ⚓ FOOTER
-# =====================================
-st.markdown("""
----
-<div style="text-align:center; color:#7a7; font-size:0.9rem;">
-Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
-Military Ops UI · Streamlit + Plotly
-</div>
-""", unsafe_allow_html=True)
+st.success("Wind Barb ICAO berhasil ditampilkan ✔")
