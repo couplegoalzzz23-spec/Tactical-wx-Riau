@@ -190,6 +190,24 @@ hr, .stDivider {
     font-weight: bold;
 }
 
+/* Wind Vector SVG container */
+.wind-vector {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+}
+.wind-svg {
+  width:140px;
+  height:140px;
+  display:block;
+  transform-origin:center center;
+}
+.wind-legend {
+  font-size:0.9rem;
+  color:#dfffe0;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -203,6 +221,7 @@ METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
 # =====================================
 # 🧰 UTILITAS
 # =====================================
+# CACHE: flatten_cuaca_entry bisa expensive jika dipanggil berulang — cache hasilnya per entry (hashable key: adm1+timestamp)
 @st.cache_data(ttl=300)
 def fetch_forecast(adm1: str):
     params = {"adm1": adm1}
@@ -210,7 +229,16 @@ def fetch_forecast(adm1: str):
     resp.raise_for_status()
     return resp.json()
 
-def flatten_cuaca_entry(entry):
+# cache flattening per-entry id to avoid repeated heavy parsing
+@st.cache_data(ttl=300)
+def flatten_cuaca_entry_cached(entry_serialized):
+    """
+    Wrapper expects a hashable serialization (e.g., str(entry)) to cache.
+    """
+    entry = pd.read_json(entry_serialized, orient="records")[0] if isinstance(entry_serialized, str) and entry_serialized.startswith("[") else entry_serialized
+    return flatten_cuaca_entry_core(entry)
+
+def flatten_cuaca_entry_core(entry):
     rows = []
     lokasi = entry.get("lokasi", {})
     for group in entry.get("cuaca", []):
@@ -229,10 +257,21 @@ def flatten_cuaca_entry(entry):
             r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
             rows.append(r)
     df = pd.DataFrame(rows)
-    for c in ["t","tcc","tp","wd_deg","ws","hu","vs","ws_kt"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+    # vectorize numeric conversion
+    numcols = [c for c in ["t","tcc","tp","wd_deg","ws","hu","vs","ws_kt"] if c in df.columns]
+    if numcols:
+        df[numcols] = df[numcols].apply(pd.to_numeric, errors="coerce")
     return df
+
+# Keep original name compatibility (non-cached) for fallback
+def flatten_cuaca_entry(entry):
+    # Use the cached wrapper when possible (serialize minimal)
+    try:
+        # We try to create a small serializable representation (only 'lokasi' and 'cuaca' to make key stable)
+        serial = pd.io.json.dumps({"lokasi": entry.get("lokasi", {}), "cuaca": entry.get("cuaca", [])})
+        return flatten_cuaca_entry_cached(serial)
+    except Exception:
+        return flatten_cuaca_entry_core(entry)
 
 def estimate_dewpoint(temp, rh):
     if pd.isna(temp) or pd.isna(rh):
@@ -244,15 +283,6 @@ def ceiling_proxy_from_tcc(tcc_pct):
     """
     Proxy estimate for ceiling (feet) using cloud cover percentage.
     Returns estimated ceiling category in feet (median of category) and as label.
-    
-    Tabel konversi proxy yang digunakan:
-    Tutupan Awan (tcc %) | Label Penerbangan | Estimasi Ketinggian Dasar (Feet) | Status (Proxy)
-    ---------------------|-------------------|----------------------------------|----------------
-    tcc < 1%             | SKC (Clear)       | 99999 ft (Tidak membatasi)       | VFR
-    1% <= tcc < 25%      | FEW (Few)         | 3500 ft (Median)                 | VFR
-    25% <= tcc < 50%     | SCT (Scattered)   | 2250 ft (Median)                 | MVFR/VFR
-    50% <= tcc < 75%     | BKN (Broken)      | 1250 ft (Median)                 | IFR/MVFR
-    tcc >= 75%           | OVC (Overcast)    | 800 ft (Median Rendah)           | IFR
     """
     if pd.isna(tcc_pct):
         return None, "Unknown"
@@ -280,17 +310,13 @@ def convert_vis_to_sm(visibility_m):
         vis_sm = vis_m * METER_TO_SM
         # Use simple fraction/mixed number representation for visibility common in aviation
         if vis_sm < 1:
-            # Example: 0.5 SM
             return f"{vis_sm:.1f} SM"
         elif vis_sm < 5:
-            # Example: 1 1/2 SM
-            # Simple way to check for half mile (0.5)
-            if (vis_sm * 2) % 2 == 0: # Integer miles
+            if (vis_sm * 2) % 2 == 0:
                 return f"{int(vis_sm)} SM"
             else:
-                return f"{vis_sm:.1f} SM" # Keep 1 decimal for simplicity in this case
+                return f"{vis_sm:.1f} SM"
         else:
-            # For 5 SM and above, integer miles usually suffice
             return f"{int(round(vis_sm))} SM"
     except ValueError:
         return "—"
@@ -306,11 +332,9 @@ def classify_ifr_vfr(visibility_m, ceiling_ft):
         if vis_sm >= 3: return "VFR"
         elif vis_sm >= 1: return "MVFR"
         else: return "IFR"
-        
-    # Standard FAA/ICAO thresholds (approximate)
-    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR" # VFR
-    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR" # MVFR
-    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR" # IFR
+    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR"
+    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR"
+    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR"
     return "Unknown"
 
 def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
@@ -349,6 +373,26 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
+# Additional util: compute wind vector components and headwind/crosswind vs runway
+def wind_components(ws_kt, wd_deg, rwy_heading_deg):
+    """
+    Compute headwind and crosswind components for a runway heading.
+    Positive headwind = headwind, negative = tailwind.
+    crosswind positive = from right, negative = from left.
+    """
+    try:
+        ws = float(ws_kt)
+        wd = float(wd_deg) % 360
+        rwy = float(rwy_heading_deg) % 360
+    except Exception:
+        return None, None
+    # Wind direction is where wind is coming from. Relative angle between wind and runway heading:
+    rel_angle = np.deg2rad((wd - rwy + 360) % 360)
+    # Headwind = ws * cos(rel_angle) (positive = headwind)
+    head = ws * np.cos(rel_angle)
+    # Crosswind = ws * sin(rel_angle) (positive = from right)
+    cross = ws * np.sin(rel_angle)
+    return head, cross
 
 # =====================================
 # 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
@@ -363,11 +407,16 @@ with st.sidebar:
     st.button("🔄 Fetch Data")
     st.markdown("---")
     # Kontrol Tampilan
-    # show_metar (FCST Style Report) telah dihapus
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table (Raw Data)", value=False)
     # Kontrol baru untuk MET Report
     show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
+
+    # NEW: Optional runway heading for crosswind/headwind computation (user can enter runway true heading)
+    st.markdown("---")
+    st.caption("Optional: runway heading for headwind/crosswind calc")
+    runway_heading = st.number_input("Runway Heading (deg)", value=90, min_value=0, max_value=360, step=1, help="Enter runway magnetic/true heading in degrees (e.g., 090)")
+
     st.markdown("---")
     st.caption("Data Source: BMKG API · Military Ops v2.2")
 
@@ -400,6 +449,7 @@ try:
         st.metric("📍 Locations", len(mapping))
 
     selected_entry = mapping[loc_choice]["entry"]
+    # Use the cached flatten; we serialize only small parts inside flatten to keep stable key
     df = flatten_cuaca_entry(selected_entry)
 
     if df.empty:
@@ -466,25 +516,73 @@ try:
 
     
 # =====================================
-# ✈ FLIGHT WEATHER STATUS (KEY METRICS)
+# ✈ FLIGHT WEATHER STATUS (KEY METRICS) - (DENGAN WIND VECTOR)
 # =====================================
     st.markdown("---") # Garis pemisah sebelum Key Metrics
     st.markdown('<div class="flight-card">', unsafe_allow_html=True)
     st.markdown('<div class="flight-title">✈ Key Meteorological Status</div>', unsafe_allow_html=True)
     
+    # compute wind vector parameters
+    ws_kt_val = now.get('ws_kt', None)
+    wd_deg_val = now.get('wd_deg', None)
+    # ensure numeric
+    try:
+        ws_kt_num = float(ws_kt_val) if ws_kt_val is not None and not pd.isna(ws_kt_val) else None
+    except Exception:
+        ws_kt_num = None
+    try:
+        wd_deg_num = float(wd_deg_val) if wd_deg_val is not None and not pd.isna(wd_deg_val) else None
+    except Exception:
+        wd_deg_num = None
+
+    # Headwind / crosswind using user-provided runway_heading
+    headwind, crosswind = wind_components(ws_kt_num, wd_deg_num, runway_heading) if (ws_kt_num is not None and wd_deg_num is not None) else (None, None)
+
     colA, colB, colC, colD = st.columns(4)
     with colA:
         st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
     with colB:
+        # Wind numeric
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{ws_kt_num if ws_kt_num is not None else '—'}{'' if ws_kt_num is None else ' KT'}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>{wd_deg_num if wd_deg_num is not None else '—'}°</div>", unsafe_allow_html=True)
+
+        # Wind vector visual (small SVG) and numeric breakdown
+        # Build SVG arrow: length scaled from ws_kt (cap at 40 KT visually) and rotate by wind direction (wind from)
+        if ws_kt_num is not None and wd_deg_num is not None:
+            # Scale length (max visual length 60)
+            max_display_speed = 40.0
+            length_px = max(20, min(60, int((ws_kt_num / max_display_speed) * 60)))
+            # SVG: arrow pointing up (0deg) and rotated by wd_deg_num (wind from). We rotate to point from where wind comes.
+            svg = f"""
+            <div class='wind-vector'>
+              <svg class='wind-svg' viewBox='0 0 140 140' preserveAspectRatio='xMidYMid meet'>
+                <g transform="translate(70,70) rotate({wd_deg_num})">
+                  <line x1="0" y1="0" x2="0" y2="-{length_px}" stroke="#b6ff6d" stroke-width="4" stroke-linecap="round" />
+                  <polygon points="0,-{length_px-8} -6,-{length_px-0} 6,-{length_px-0}" fill="#b6ff6d"/>
+                  <!-- tail feathers -->
+                  <line x1="0" y1="-{length_px/3}" x2="-12" y2="-{length_px/3 + 8}" stroke="#b6ff6d" stroke-width="3" />
+                  <line x1="0" y1="-{length_px/2}" x2="12" y2="-{length_px/2 + 8}" stroke="#b6ff6d" stroke-width="3" />
+                </g>
+              </svg>
+              <div class='wind-legend'>
+                <div><strong>Vector:</strong> {wd_deg_num:.0f}° from / {ws_kt_num:.1f} KT</div>
+                <div>Headwind: {f'{headwind:.1f} KT' if headwind is not None else '—'}</div>
+                <div>Crosswind: {f'{abs(crosswind):.1f} KT'} ({'from right' if crosswind is not None and crosswind>0 else 'from left' if crosswind is not None else '—'})</div>
+                <div style="font-size:0.8rem; color:#9fa8a0; margin-top:6px;">Runway heading used: {int(runway_heading):03d}°</div>
+              </div>
+            </div>
+            """
+            st.markdown(svg, unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='small-note'>Wind vector not available</div>", unsafe_allow_html=True)
+
     with colC:
-        st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
+        st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
+        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True)
     with colD:
         st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
@@ -697,6 +795,7 @@ try:
     st.subheader("📊 Parameter Trends")
     c1, c2 = st.columns(2)
     with c1:
+        # Use df_sel which is already sliced and smaller — avoids re-indexing entire df
         st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
         st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
     with c2:
@@ -711,34 +810,36 @@ try:
     if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
         df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
         if not df_wr.empty:
+            # Pre-calc arrays for performance
             bins_dir = np.arange(-11.25,360,22.5)
             labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
             
-            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)  
+            # Use vectorized modulo and cut
+            dir_vals = (df_wr["wd_deg"].astype(float) % 360).to_numpy()
+            df_wr = df_wr.assign(_dir = pd.cut(dir_vals, bins=bins_dir, labels=labels_dir, include_lowest=True))
             
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
+            df_wr = df_wr.assign(_speed = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True))
             
-            df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
-            
-            freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
-            
+            freq = df_wr.groupby(["_dir","_speed"]).size().reset_index(name="count")
             freq["percent"] = freq["count"]/freq["count"].sum()*100
             az_map = {
                 "N":0,"NNE":22.5,"NE":45,"ENE":67.5,"E":90,"ESE":112.5,"SE":135,
                 "SSE":157.5,"S":180,"SSW":202.5,"SW":225,"WSW":247.5,"W":270,
                 "WNW":292.5,"NW":315,"NNW":337.5
             }
-            freq["theta"] = freq["dir_sector"].map(az_map)
+            freq["theta"] = freq["_dir"].map(az_map)
             colors = ["#00ffbf","#80ff00","#d0ff00","#ffb300","#ff6600","#ff0033"]
             fig_wr = go.Figure()
             for i, sc in enumerate(speed_labels):
-                subset = freq[freq["speed_class"]==sc]
-                fig_wr.add_trace(go.Barpolar(
-                    r=subset["percent"], theta=subset["theta"],
-                    name=f"{sc} KT", marker_color=colors[i], opacity=0.85
-                ))
+                subset = freq[freq["_speed"]==sc]
+                if not subset.empty:
+                    fig_wr.add_trace(go.Barpolar(
+                        r=subset["percent"], theta=subset["theta"],
+                        name=f"{sc} KT", marker_color=colors[i], opacity=0.85
+                    ))
             fig_wr.update_layout(
                 title="Windrose (KT)",
                 polar=dict(
