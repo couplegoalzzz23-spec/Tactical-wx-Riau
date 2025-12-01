@@ -190,8 +190,95 @@ hr, .stDivider {
     font-weight: bold;
 }
 
+/* -----------------------------
+   HUD wrapper specific styles
+   ----------------------------- */
+#f16hud-wrapper[data-mode='day'] #f16hud-container {
+    background: rgba(200, 255, 200, 0.12);
+    border-color: #7fbf7f;
+    box-shadow: 0 0 10px #7f7 inset;
+}
+#f16hud-wrapper[data-mode='night'] #f16hud-container {
+    background: rgba(0, 10, 0, 0.75);
+    border-color: #0f0;
+    box-shadow: 0 0 20px #0f0 inset;
+}
+#f16hud-container {
+    width: 100%;
+    background: rgba(0, 10, 0, 0.70);
+    border: 1px solid #1f3;
+    border-radius: 12px;
+    padding: 12px;
+    margin-top: 18px;
+    box-shadow: 0 0 15px #0f0 inset;
+}
+#f16hud-title {
+    color: #0f0;
+    font-size: 1.05rem;
+    text-align: center;
+    margin-bottom: 8px;
+    text-shadow: 0 0 6px #0f0;
+}
+#f16hud-svg {
+    width: 100%;
+    height: 220px;
+    display: block;
+    margin: auto;
+}
+.hud-glow {
+    stroke: #0f0;
+    stroke-width: 2;
+    fill: none;
+    filter: drop-shadow(0 0 6px #0f0);
+}
+#hud-wind-arrow {
+    stroke-width: 3;
+    stroke-linecap: round;
+    animation: windPulse 1.8s infinite ease-in-out;
+}
+@keyframes windPulse {
+    0%   { stroke-opacity: 0.4; }
+    50%  { stroke-opacity: 1.0; }
+    100% { stroke-opacity: 0.4; }
+}
 </style>
 """, unsafe_allow_html=True)
+
+# =====================================
+# 🟢 HUD + DAY/NIGHT LOGIC (ADDITIONAL BLOCKS)
+# =====================================
+
+# Helper: safe numeric getters to avoid formatting errors
+def safe_float(val, default=0.0):
+    try:
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return default
+        return float(val)
+    except Exception:
+        return default
+
+def safe_int(val, default=0):
+    try:
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return default
+        return int(round(float(val)))
+    except Exception:
+        return default
+
+# Day/night control in sidebar (hybrid Auto + manual override)
+with st.sidebar:
+    st.markdown("---")
+    st.subheader("🌗 Display Mode")
+    override_mode = st.selectbox("Override Mode", ["Auto", "Day", "Night"], index=0)
+
+def get_day_night_mode():
+    if override_mode == "Day": return "day"
+    if override_mode == "Night": return "night"
+    # AUTO MODE (local)
+    hour = datetime.now().hour
+    return "day" if 6 <= hour < 18 else "night"
+
+CURRENT_MODE = get_day_night_mode()
 
 # =====================================
 # 📡 KONFIGURASI API
@@ -241,19 +328,6 @@ def estimate_dewpoint(temp, rh):
     return temp - ((100 - rh) / 5)
 
 def ceiling_proxy_from_tcc(tcc_pct):
-    """
-    Proxy estimate for ceiling (feet) using cloud cover percentage.
-    Returns estimated ceiling category in feet (median of category) and as label.
-    
-    Tabel konversi proxy yang digunakan:
-    Tutupan Awan (tcc %) | Label Penerbangan | Estimasi Ketinggian Dasar (Feet) | Status (Proxy)
-    ---------------------|-------------------|----------------------------------|----------------
-    tcc < 1%             | SKC (Clear)       | 99999 ft (Tidak membatasi)       | VFR
-    1% <= tcc < 25%      | FEW (Few)         | 3500 ft (Median)                 | VFR
-    25% <= tcc < 50%     | SCT (Scattered)   | 2250 ft (Median)                 | MVFR/VFR
-    50% <= tcc < 75%     | BKN (Broken)      | 1250 ft (Median)                 | IFR/MVFR
-    tcc >= 75%           | OVC (Overcast)    | 800 ft (Median Rendah)           | IFR
-    """
     if pd.isna(tcc_pct):
         return None, "Unknown"
     tcc = float(tcc_pct)
@@ -269,54 +343,37 @@ def ceiling_proxy_from_tcc(tcc_pct):
         return 800, "OVC (<1000 ft)"
 
 def convert_vis_to_sm(visibility_m):
-    """
-    Convert visibility in meters (m) to Statute Miles (SM).
-    Returns string representation.
-    """
     if pd.isna(visibility_m) or visibility_m is None:
         return "—"
     try:
         vis_m = float(visibility_m)
         vis_sm = vis_m * METER_TO_SM
-        # Use simple fraction/mixed number representation for visibility common in aviation
         if vis_sm < 1:
-            # Example: 0.5 SM
             return f"{vis_sm:.1f} SM"
         elif vis_sm < 5:
-            # Example: 1 1/2 SM
-            # Simple way to check for half mile (0.5)
-            if (vis_sm * 2) % 2 == 0: # Integer miles
+            if (vis_sm * 2) % 2 == 0:
                 return f"{int(vis_sm)} SM"
             else:
-                return f"{vis_sm:.1f} SM" # Keep 1 decimal for simplicity in this case
+                return f"{vis_sm:.1f} SM"
         else:
-            # For 5 SM and above, integer miles usually suffice
             return f"{int(round(vis_sm))} SM"
     except ValueError:
         return "—"
 
 def classify_ifr_vfr(visibility_m, ceiling_ft):
-    """
-    Classify into VFR / MVFR / IFR using conservative thresholds.
-    """
     if visibility_m is None or pd.isna(visibility_m):
         return "Unknown"
-    vis_sm = float(visibility_m) / 1609.34 # Convert to Statute Miles (approximation)
+    vis_sm = float(visibility_m) / 1609.34
     if ceiling_ft is None:
         if vis_sm >= 3: return "VFR"
         elif vis_sm >= 1: return "MVFR"
         else: return "IFR"
-        
-    # Standard FAA/ICAO thresholds (approximate)
-    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR" # VFR
-    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR" # MVFR
-    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR" # IFR
+    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR"
+    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR"
+    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR"
     return "Unknown"
 
 def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
-    """
-    Simple tactical recommendation rules (conservative).
-    """
     rationale = []
     takeoff = "Recommended"
     landing = "Recommended"
@@ -348,7 +405,6 @@ def badge_html(status):
     if status == "IFR" or status == "Not Recommended":
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
-
 
 # =====================================
 # 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
@@ -491,6 +547,56 @@ try:
         st.markdown(f"<div class='small-note'>Rain: {now.get('tp',0):.1f} mm (Accum.)</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
+
+    # -----------------------------
+    # INSERT HUD (MODE B) — PANEL
+    # -----------------------------
+    # Render HUD wrapper with data-mode attribute so CSS picks Day/Night
+    hud_wrapper_open = f"<div id='f16hud-wrapper' data-mode='{CURRENT_MODE}'>"
+    st.markdown(hud_wrapper_open, unsafe_allow_html=True)
+    st.markdown("<div id='f16hud-container'>", unsafe_allow_html=True)
+    st.markdown("<div id='f16hud-title'>F-16 TACTICAL HUD OVERLAY — PANEL (Mode B)</div>", unsafe_allow_html=True)
+
+    # dynamic HUD variables (safe)
+    _wdir = safe_int(now.get("wd_deg"), default=0)
+    _wspd = safe_float(now.get("ws_kt"), default=0.0)
+    _vis = safe_int(now.get("vs"), default=0)
+    _ceil = safe_int(ceiling_est_ft, default=0)
+
+    # limit wind arrow length so it fits nicely
+    max_arrow_len = 120
+    arrow_len = min(max_arrow_len, int(_wspd * 3))  # scaling factor for visibility in HUD
+
+    # Compute end point of arrow relative to center (400,150) used below
+    dx = np.sin(np.radians(_wdir)) * arrow_len
+    dy = -np.cos(np.radians(_wdir)) * arrow_len  # negative because SVG Y increases downward
+
+    hud_svg = f"""
+    <svg id="f16hud-svg" viewBox="0 0 800 300" preserveAspectRatio="xMidYMid meet">
+      <!-- Horizon -->
+      <line x1="50" y1="150" x2="750" y2="150" class="hud-glow" stroke="#0f0" stroke-width="1.5"/>
+      <!-- Pitch Ladder short marks -->
+      <line x1="140" y1="120" x2="200" y2="120" class="hud-glow" stroke="#0f0" stroke-width="1"/>
+      <line x1="140" y1="180" x2="200" y2="180" class="hud-glow" stroke="#0f0" stroke-width="1"/>
+      <!-- Heading -->
+      <text x="400" y="42" fill="#0f0" font-size="22" text-anchor="middle">HDG {_wdir:03d}°</text>
+      <!-- Wind arrow from center -->
+      <line id="hud-wind-arrow" x1="400" y1="150" x2="{400 + dx:.1f}" y2="{150 + dy:.1f}" stroke="#0f0" />
+      <polygon points="{400 + dx:.1f},{150 + dy:.1f} {400 + dx - 6:.1f},{150 + dy - 6:.1f} {400 + dx + 6:.1f},{150 + dy - 6:.1f}" fill="#0f0"/>
+      <!-- Wind readout -->
+      <text x="400" y="190" fill="#0f0" font-size="18" text-anchor="middle">WIND {_wdir}° / {_wspd:.1f} KT</text>
+      <!-- Visibility and Ceiling -->
+      <text x="120" y="260" fill="#0f0" font-size="16">VIS: {_vis} m ({convert_vis_to_sm(_vis)})</text>
+      <text x="680" y="260" fill="#0f0" font-size="16" text-anchor="end">CEIL: {_ceil} ft</text>
+      <!-- Tactical quick statuses -->
+      <rect x="18" y="18" width="110" height="28" fill="rgba(0,0,0,0.3)" stroke="#0f0" rx="6"/>
+      <text x="74" y="36" fill="#0f0" font-size="12" text-anchor="middle">TACTICAL</text>
+    </svg>
+    """
+
+    st.markdown(hud_svg, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)  # close container
+    st.markdown("</div>", unsafe_allow_html=True)  # close wrapper
 
 # =====================================
 # ☁ METEOROLOGICAL DETAILS (SECONDARY) - REVISI
