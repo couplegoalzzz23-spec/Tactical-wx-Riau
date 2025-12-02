@@ -76,26 +76,6 @@ body {
         color-adjust: exact;
     }
 }
-
-/* Custom CSS for METAR Block (Dihapus dari skrip utama, namun CSS-nya tetap di sini) */
-.metar-block {
-    background-color: #1a2a1f;
-    border: 1px solid #3f4f3f;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    font-family: 'Consolas', monospace;
-    font-size: 1.1rem;
-    color: #b6ff6d;
-    overflow-x: auto; /* Untuk METAR yang sangat panjang */
-}
-.metar-title {
-    color: #9adf4f;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-}
-
 </style>
 """
 
@@ -241,11 +221,17 @@ hr, .stDivider {
 .wind-barb-flag {
     fill: #0f0;
 }
+/* CSS untuk inline Wind Barb */
+.inline-barb-container {
+    display: flex; 
+    align-items: center;
+    gap: 5px; /* Spasi antar elemen */
+}
 </style>
 """, unsafe_allow_html=True)
 
 # =====================================
-# 🟢 HUD + DAY/NIGHT LOGIC (ADDITIONAL BLOCKS)
+# 🟢 HUD + DAY/NIGHT LOGIC
 # =====================================
 
 # Helper: safe numeric getters to avoid formatting errors
@@ -265,62 +251,87 @@ def safe_int(val, default=0):
     except Exception:
         return default
 
-# Fungsi baru: Menghasilkan kode SVG Wind Barb
-def generate_wind_barb_svg(wdir, wspd_kt, center_x, center_y, scale=1.0):
-    if wspd_kt < 2.5: # Kurang dari 2 knot, anggap Calm (tidak digambar atau digambar simbol Calm)
+# Fungsi 1: Menghasilkan kode SVG Wind Barb Skala Besar (untuk HUD)
+def generate_hud_wind_barb_svg(wdir, wspd_kt, center_x, center_y, scale=1.0):
+    if wspd_kt < 2.5: # Kurang dari 2 knot, anggap Calm
         return f'<circle cx="{center_x}" cy="{center_y}" r="{5*scale}" class="hud-glow" fill="none" stroke="#0f0" stroke-width="2"/>' # Simbol Calm
     
-    # Konversi arah angin (dari mana angin bertiup) ke arah barbs (ke mana angin menuju)
-    # Arah angin diukur clockwise dari Utara (0 derajat).
-    # Di SVG, Y ke bawah. Kita gunakan rotasi normal: 0=Atas, 90=Kanan, 180=Bawah, 270=Kiri.
-    # WDIR = Arah dari mana angin datang. Kita perlu rotasi agar barbs menunjuk ke WDIR.
-    
-    # Rotasi: Rotasi di SVG diukur clockwise. WDIR 0 (Utara) berarti barbs menunjuk ke atas.
-    # Rotasi total untuk membuat barb menunjuk ke arah datangnya angin (WDIR)
-    rotation_angle = wdir - 180 # Barbs harus berada di sisi datangnya angin (WDIR - 180 derajat)
-    
-    barb_length = 30 * scale # Panjang garis utama barb
-    
-    # Barbs digambar dari center_y ke atas (utara)
-    # y_end adalah titik terminal barb (ujung yang menjauh dari pusat)
+    rotation_angle = wdir - 180 
+    barb_length = 30 * scale
     y_end = center_y - barb_length
 
-    # SVG untuk Barb: Semua dirotasi
     svg_barb = f'<g transform="translate({center_x}, {center_y}) rotate({rotation_angle})">'
-    
-    # Garis utama barb (menunjuk ke atas setelah rotasi)
     svg_barb += f'<line x1="0" y1="0" x2="0" y2="{-barb_length}" class="wind-barb-line"/>'
     
-    # Posisi awal untuk 'feathers' (dari titik akhir, y_end = -barb_length)
     y_feather_start = -barb_length
-    
-    # Variabel untuk offset y
     y_offset = 0
-
-    # Logika menggambar Feathers (Bendera 50 KT, Penuh 10 KT, Setengah 5 KT)
     remaining_wspd = wspd_kt
     
-    # 1. Bendera (Flag) 50 KT: Setiap bendera mewakili 50 knot
-    while remaining_wspd >= 47.5: # Ambil 50 knot
-        # Gambar bendera (segitiga di ujung garis)
+    while remaining_wspd >= 47.5:
         svg_barb += f'<polygon points="0, {y_feather_start + y_offset} 6, {y_feather_start + y_offset + 5} 0, {y_feather_start + y_offset + 10}" class="wind-barb-flag"/>'
-        y_offset += 10 # Pindah ke bawah untuk barb berikutnya
+        y_offset += 10
         remaining_wspd -= 50
     
-    # 2. Barbs Penuh (Full Barb) 10 KT: Setiap barb penuh mewakili 10 knot
-    while remaining_wspd >= 7.5: # Ambil 10 knot
-        # Garis penuh (panjang ~10)
+    while remaining_wspd >= 7.5:
         svg_barb += f'<line x1="0" y1="{y_feather_start + y_offset}" x2="10" y2="{y_feather_start + y_offset + 5}" class="wind-barb-line"/>'
-        y_offset += 7 # Pindah ke bawah
+        y_offset += 7
         remaining_wspd -= 10
         
-    # 3. Barbs Setengah (Half Barb) 5 KT: Setengah mewakili 5 knot
-    if remaining_wspd >= 2.5: # Ambil 5 knot
-        # Garis setengah (panjang ~5)
+    if remaining_wspd >= 2.5:
         svg_barb += f'<line x1="0" y1="{y_feather_start + y_offset}" x2="5" y2="{y_feather_start + y_offset + 2.5}" class="wind-barb-line"/>'
     
     svg_barb += '</g>'
     return svg_barb
+
+# Fungsi 2: Menghasilkan kode HTML/SVG Wind Barb Skala Kecil (untuk Inline)
+def generate_inline_wind_barb_html(wdir, wspd_kt, size=30):
+    # size = tinggi SVG viewBox
+    # center_x dan center_y untuk viewBox kecil (e.g., 15, 15)
+    center_x = size / 2
+    center_y = size / 2
+    barb_length = size * 0.7 
+    COLOR = "#b6ff6d" # Warna hijau neon
+
+    if wspd_kt < 2.5: 
+        # Simbol Calm
+        calm_symbol = f'''
+            <circle cx="{center_x}" cy="{center_y}" r="{(size*0.1)}" fill="none" stroke="{COLOR}" stroke-width="1.5"/>
+            <line x1="{center_x-4}" y1="{center_y}" x2="{center_x+4}" y2="{center_y}" stroke="{COLOR}" stroke-width="1.5" stroke-linecap="round"/>
+        '''
+        return f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" style="vertical-align: middle; flex-shrink: 0; margin-top: -3px;">{calm_symbol}</svg>'
+
+    # Rotasi: WDIR (dari mana angin datang) - 180 derajat
+    rotation_angle = wdir - 180
+    
+    svg_content = f'<g transform="translate({center_x}, {center_y}) rotate({rotation_angle})">'
+    
+    # Garis utama barb
+    svg_content += f'<line x1="0" y1="0" x2="0" y2="{-barb_length}" stroke="{COLOR}" stroke-width="1.5" stroke-linecap="round"/>'
+    
+    y_feather_start = -barb_length
+    y_offset = 0
+
+    remaining_wspd = wspd_kt
+    
+    # 50 KT Flags
+    while remaining_wspd >= 47.5:
+        svg_content += f'<polygon points="0, {y_feather_start + y_offset} 4, {y_feather_start + y_offset + 3} 0, {y_feather_start + y_offset + 6}" fill="{COLOR}"/>'
+        y_offset += 6
+        remaining_wspd -= 50
+    
+    # 10 KT Full Barb
+    while remaining_wspd >= 7.5:
+        svg_content += f'<line x1="0" y1="{y_feather_start + y_offset}" x2="7" y2="{y_feather_start + y_offset + 3.5}" stroke="{COLOR}" stroke-width="1.5" stroke-linecap="round"/>'
+        y_offset += 5
+        remaining_wspd -= 10
+        
+    # 5 KT Half Barb
+    if remaining_wspd >= 2.5:
+        svg_content += f'<line x1="0" y1="{y_feather_start + y_offset}" x2="3.5" y2="{y_feather_start + y_offset + 1.75}" stroke="{COLOR}" stroke-width="1.5" stroke-linecap="round"/>'
+    
+    svg_content += '</g>'
+    
+    return f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" style="vertical-align: middle; flex-shrink: 0; margin-top: -3px;">{svg_content}</svg>'
 
 # Day/night control in sidebar (hybrid Auto + manual override)
 with st.sidebar:
@@ -476,13 +487,12 @@ with st.sidebar:
     st.button("🔄 Fetch Data")
     st.markdown("---")
     # Kontrol Tampilan
-    # show_metar (FCST Style Report) telah dihapus
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table (Raw Data)", value=False)
     # Kontrol baru untuk MET Report
-    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
+    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) 
     st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v2.2")
+    st.caption("Data Source: BMKG API · Military Ops v3.0")
 
 # =====================================
 # 📡 LOAD DATA
@@ -582,6 +592,11 @@ try:
     # NEW: Konversi Visibilitas ke Statute Miles
     vis_sm_disp = convert_vis_to_sm(now.get('vs'))
 
+    # dynamic HUD variables (safe) - DIHITUNG DI AWAL
+    _wdir = safe_int(now.get("wd_deg"), default=0)
+    _wspd = safe_float(now.get("ws_kt"), default=0.0)
+    _vis = safe_int(now.get("vs"), default=0)
+    _ceil = safe_int(ceiling_est_ft, default=0)
     
 # =====================================
 # ✈ FLIGHT WEATHER STATUS (KEY METRICS)
@@ -591,18 +606,23 @@ try:
     st.markdown('<div class="flight-title">✈ Key Meteorological Status</div>', unsafe_allow_html=True)
     
     colA, colB, colC, colD = st.columns(4)
+    
+    # Generate inline wind barb for Key Metrics
+    wind_barb_inline_key = generate_inline_wind_barb_html(_wdir, _wspd, size=30)
+    
     with colA:
         st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
+        # 📌 PERUBAHAN DI SINI: Menyertakan Wind Barb inline
+        st.markdown(f"<div class='metric-value inline-barb-container'>{wind_barb_inline_key} {_wspd:.1f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>{_wdir}°</div>", unsafe_allow_html=True)
     with colC:
-        st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
+        st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True) 
         st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
+        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) 
     with colD:
         st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
@@ -619,14 +639,8 @@ try:
     st.markdown("<div id='f16hud-container'>", unsafe_allow_html=True)
     st.markdown("<div id='f16hud-title'>F-16 TACTICAL HUD OVERLAY — PANEL (Mode B)</div>", unsafe_allow_html=True)
 
-    # dynamic HUD variables (safe)
-    _wdir = safe_int(now.get("wd_deg"), default=0)
-    _wspd = safe_float(now.get("ws_kt"), default=0.0)
-    _vis = safe_int(now.get("vs"), default=0)
-    _ceil = safe_int(ceiling_est_ft, default=0)
-
-    # Generate Wind Barb SVG
-    wind_barb_svg_code = generate_wind_barb_svg(
+    # Generate Wind Barb SVG (Skala Besar)
+    wind_barb_svg_code = generate_hud_wind_barb_svg(
         wdir=_wdir, 
         wspd_kt=_wspd, 
         center_x=400, 
@@ -661,6 +675,9 @@ try:
     st.markdown('<div class="flight-title">☁ Meteorological Details</div>', unsafe_allow_html=True)
 
     detail_col1, detail_col2 = st.columns(2)
+    
+    # Generate inline wind barb for Meteorological Details
+    wind_barb_inline_detail = generate_inline_wind_barb_html(_wdir, _wspd, size=25)
 
     with detail_col1:
         st.markdown("##### 🌡️ Atmospheric State")
@@ -680,7 +697,8 @@ try:
             st.markdown(f"<div class='detail-value'>{now.get('hu','—')}%</div>", unsafe_allow_html=True)
         with col_wd:
             st.markdown("<div class='metric-label'>Wind Direction (Code)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{now.get('wd','—')} ({now.get('wd_deg','—')}°)</div>", unsafe_allow_html=True)
+            # 📌 PERUBAHAN DI SINI: Menyertakan Wind Barb inline
+            st.markdown(f"<div class='detail-value inline-barb-container'>{wind_barb_inline_detail} {now.get('wd','—')} ({_wdir}°)</div>", unsafe_allow_html=True)
         
         # Row 3: Location Details (Moved here)
         st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
@@ -698,9 +716,9 @@ try:
         # Row 1: Visibility & Ceiling
         col_vis, col_ceil = st.columns(2)
         with col_vis:
-            st.markdown("<div class='metric-label'>Visibility (Metres/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
+            st.markdown("<div class='metric-label'>Visibility (Metres/SM)</div>", unsafe_allow_html=True) 
             st.markdown(f"<div class='detail-value'>{now.get('vs','—')} m</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
+            st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) 
         with col_ceil:
             st.markdown("<div class='metric-label'>Est. Ceiling Base</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value'>{ceiling_display}</div>", unsafe_allow_html=True)
@@ -729,14 +747,16 @@ try:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================================
-# === MET REPORT (QAM REPLICATION) - DIPINDAHKAN KE SIDEBAR
+# === MET REPORT (QAM REPLICATION)
 # =====================================
 
     if show_qam_report:
-        # prepare MET REPORT values
-        visibility_m = now.get('vs')
-        wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
-        wind_variation = "Not available (BMKG Forecast - No Variation Data)"  # Diperbarui
+        # Generate inline wind barb for QAM report (slightly smaller)
+        wind_barb_inline_qam = generate_inline_wind_barb_html(_wdir, _wspd, size=20)
+        
+        # 📌 PERUBAHAN DI SINI: Menyertakan Wind Barb inline dalam wind_info_qam
+        wind_info_qam = f"<div class='inline-barb-container' style='font-size: 1.0rem; margin-left: -5px;'>{wind_barb_inline_qam} {_wdir}° / {_wspd:.1f} KT</div>"
+        wind_variation = "Not available (BMKG Forecast - No Variation Data)"  
         ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
 
 
@@ -757,11 +777,11 @@ try:
                 </tr>
                 <tr>
                     <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
-                    <td>{wind_info} / Variation: {wind_variation}</td>
+                    <td>{wind_info_qam} / Variation: {wind_variation}</td>
                 </tr>
                 <tr>
                     <th>HORIZONTAL VISIBILITY</th>
-                    <td>{visibility_m} m ({vis_sm_disp}) / {now.get('vs_text','—')}</td> </tr>
+                    <td>{now.get('vs','—')} m ({vis_sm_disp}) / {now.get('vs_text','—')}</td> </tr>
                 <tr>
                     <th>RUNWAY VISUAL RANGE</th>
                     <td>— (RVR not available from Forecast)</td>
