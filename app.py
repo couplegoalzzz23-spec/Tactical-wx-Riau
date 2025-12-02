@@ -76,6 +76,25 @@ body {
         color-adjust: exact;
     }
 }
+/* Custom CSS for METAR Block */
+.metar-block {
+    background-color: #1a2a1f;
+    border: 1px solid #3f4f3f;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-family: 'Consolas', monospace;
+    font-size: 1.1rem;
+    color: #b6ff6d;
+    overflow-x: auto;
+}
+.metar-title {
+    color: #9adf4f;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
 </style>
 """
 
@@ -211,6 +230,16 @@ hr, .stDivider {
     fill: none;
     filter: drop-shadow(0 0 6px #0f0);
 }
+#hud-wind-arrow {
+    stroke-width: 3;
+    stroke-linecap: round;
+    animation: windPulse 1.8s infinite ease-in-out;
+}
+@keyframes windPulse {
+    0%   { stroke-opacity: 0.4; }
+    50%  { stroke-opacity: 1.0; }
+    100% { stroke-opacity: 0.4; }
+}
 /* Wind Barb specific styles */
 .wind-barb-line {
     stroke: #0f0;
@@ -250,7 +279,7 @@ def safe_int(val, default=0):
         return int(round(float(val)))
     except Exception:
         return default
-
+        
 # Fungsi 1: Menghasilkan kode SVG Wind Barb Skala Besar (untuk HUD)
 def generate_hud_wind_barb_svg(wdir, wspd_kt, center_x, center_y, scale=1.0):
     if wspd_kt < 2.5: # Kurang dari 2 knot, anggap Calm
@@ -332,6 +361,7 @@ def generate_inline_wind_barb_html(wdir, wspd_kt, size=30):
     svg_content += '</g>'
     
     return f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" style="vertical-align: middle; flex-shrink: 0; margin-top: -3px;">{svg_content}</svg>'
+
 
 # Day/night control in sidebar (hybrid Auto + manual override)
 with st.sidebar:
@@ -474,36 +504,96 @@ def badge_html(status):
         return "<span class='badge-red'>NO-GO</span>"
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
+
+# =====================================
+# 🏠 HOME PAGE FUNCTION (NEW)
+# =====================================
+def home_page():
+    st.title("Welcome to the Tactical Weather Operations Dashboard")
+    
+    # Operational Warning (MOVED HERE)
+    st.markdown("""
+    <div style='background-color: #3a2a1f; color: #ffd86b; padding: 15px; border-radius: 6px; margin-bottom: 30px; border: 1px solid #ffaa00; font-size: 1.1rem;'>
+        ⚠️ <strong style='color: #fff;'>PERINGATAN OPERASIONAL:</strong> Data ini bersumber dari <strong style='color: #fff;'>BMKG FORECAST API</strong>. Ini adalah <strong style='color: #fff;'>RAMALAN (FORECAST)</strong>, bukan Observasi Real-Time (METAR). Gunakan untuk perencanaan, bukan untuk keputusan Take-Off/Landing final tanpa data METAR/AWOS aktual.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.header("1. Tentang Sistem Ini")
+    st.markdown("""
+    Sistem **Tactical Weather Operations Dashboard** ini dikembangkan untuk menyediakan analisis prakiraan cuaca meteorologi secara cepat. Data bersumber dari BMKG (Badan Meteorologi, Klimatologi, dan Geofisika) dan disajikan dalam format visual operasional untuk mendukung perencanaan penerbangan.
+    """)
+    
+    st.header("2. Sumber Data dan Batasan")
+    st.markdown("""
+    * **Sumber Data:** BMKG Public API for Regional Forecasts.
+    * **Jenis Data:** Prakiraan (Forecast) 3-jam ke depan.
+    * **Keakuratan:** Data ini merupakan *ramalan* dan mungkin berbeda secara signifikan dari kondisi cuaca aktual di lapangan. Selalu verifikasi dengan laporan observasi cuaca bandara aktual (**METAR** atau **AWOS**) sebelum membuat keputusan Take-Off/Landing final.
+    * **Estimasi:** Nilai seperti Dew Point dan Batas Dasar Awan (Ceiling) adalah hasil perhitungan **estimasi** berdasarkan data yang tersedia, bukan observasi langsung.
+    """)
+    
+    st.header("3. Fitur Kunci")
+    st.markdown("""
+    * **F-16 Tactical HUD:** Visualisasi cepat status cuaca kritis termasuk angin (menggunakan Wind Barb), visibilitas, dan ketinggian dasar awan.
+    * **Operational Decision Matrix:** Klasifikasi otomatis kondisi penerbangan (VFR/MVFR/IFR) dan rekomendasi Take-Off/Landing.
+    * **Wind Barb Integration:** Simbol Wind Barb yang akurat diintegrasikan ke dalam metrik kunci dan laporan QAM.
+    * **MET Report (QAM):** Replikasi format Laporan Cuaca Militer (QAM) untuk tujuan dokumentasi dan pelaporan.
+    """)
+    
+    st.markdown("---")
+    st.caption(f"Versi Aplikasi: v3.1 | Waktu Muat: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} WIB")
+
+
 # =====================================
 # 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
 # =====================================
 with st.sidebar:
     st.title("🛰️ Tactical Controls")
-    adm1 = st.text_input("Province Code (ADM1)", value="32")
-    # Tambahkan input ICAO Code
-    icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
-    st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
-    st.button("🔄 Fetch Data")
+    
+    # 📌 PERUBAHAN UTAMA: Kontrol Navigasi
+    page_choice = st.radio("Navigation", ["Home (Info)", "Dashboard (Live Ops)"], index=1, key="nav_radio")
     st.markdown("---")
-    # Kontrol Tampilan
-    show_map = st.checkbox("Show Map", value=True)
-    show_table = st.checkbox("Show Table (Raw Data)", value=False)
-    # Kontrol baru untuk MET Report
-    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) 
+    
+    if page_choice == "Dashboard (Live Ops)":
+        st.subheader("Dashboard Configuration")
+        adm1 = st.text_input("Province Code (ADM1)", value="32", key="adm1_input")
+        icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4, key="icao_input")
+        st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
+        st.button("🔄 Fetch Data", key="fetch_button")
+        st.markdown("---")
+        
+        # Kontrol Tampilan
+        show_map = st.checkbox("Show Map", value=True)
+        show_table = st.checkbox("Show Table (Raw Data)", value=False)
+        show_qam_report = st.checkbox("Show MET Report (QAM)", value=True)
+        
+        # Slider Waktu (Hanya muncul jika Dashboard dipilih dan data ada)
+        # Akan didefinisikan kemudian setelah data dimuat
+    else:
+        adm1 = "32" # Default value needed for the function calls later, though not used here
+        icao_code = "WXXX"
+        # Dummy variables needed for the main function block, though they won't be used
+        show_map = False
+        show_table = False
+        show_qam_report = False
+
     st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v3.0")
+    st.caption("Data Source: BMKG API · Military Ops v3.1")
+
 
 # =====================================
-# 📡 LOAD DATA
+# 🖥️ MAIN CONTROL BLOCK (NEW)
 # =====================================
+
+if page_choice == "Home (Info)":
+    home_page()
+    st.stop() # Stop further execution for Home page
+
+# --- BLOCK BELOW IS FOR DASHBOARD (LIVE OPS) ---
+
 st.title("Tactical Weather Operations Dashboard")
-# PERINGATAN BARU: Menekankan perbedaan Forecast vs Observation
-st.markdown("""
-<div style='background-color: #3a2a1f; color: #ffd86b; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ffaa00;'>
-    ⚠️ <strong style='color: #fff;'>PERINGATAN OPERASIONAL:</strong> Data ini bersumber dari <strong style='color: #fff;'>BMKG FORECAST API</strong>. Ini adalah <strong style='color: #fff;'>RAMALAN (FORECAST)</strong>, bukan Observasi Real-Time (METAR). Gunakan untuk perencanaan, bukan untuk keputusan Take-Off/Landing final tanpa data METAR/AWOS aktual.
-</div>
-""", unsafe_allow_html=True)
+st.markdown("*Source: BMKG Forecast API — Live Data*")
+
 
 # BLOK TRY DIMULAI DI SINI
 try:
@@ -561,10 +651,11 @@ try:
 
     # slider only when datetime exists
     if use_col:
-        # Memindahkan slider ke Sidebar
+        # Memindahkan slider ke Sidebar (di dalam blok if page_choice == "Dashboard (Live Ops)")
         with st.sidebar:
+            st.markdown("---")
             start_dt = st.slider(
-                "Time Range",
+                "Time Range (Forecast Time)",
                 min_value=min_dt,
                 max_value=max_dt,
                 # Set default range to cover only the first forecast time
@@ -589,10 +680,10 @@ try:
     ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
     ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
     
-    # NEW: Konversi Visibilitas ke Statute Miles
+    # Konversi Visibilitas ke Statute Miles
     vis_sm_disp = convert_vis_to_sm(now.get('vs'))
 
-    # dynamic HUD variables (safe) - DIHITUNG DI AWAL
+    # dynamic HUD variables (safe) 
     _wdir = safe_int(now.get("wd_deg"), default=0)
     _wspd = safe_float(now.get("ws_kt"), default=0.0)
     _vis = safe_int(now.get("vs"), default=0)
@@ -616,7 +707,7 @@ try:
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        # 📌 PERUBAHAN DI SINI: Menyertakan Wind Barb inline
+        # Menyertakan Wind Barb inline
         st.markdown(f"<div class='metric-value inline-barb-container'>{wind_barb_inline_key} {_wspd:.1f}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-note'>{_wdir}°</div>", unsafe_allow_html=True)
     with colC:
@@ -697,7 +788,7 @@ try:
             st.markdown(f"<div class='detail-value'>{now.get('hu','—')}%</div>", unsafe_allow_html=True)
         with col_wd:
             st.markdown("<div class='metric-label'>Wind Direction (Code)</div>", unsafe_allow_html=True)
-            # 📌 PERUBAHAN DI SINI: Menyertakan Wind Barb inline
+            # Menyertakan Wind Barb inline
             st.markdown(f"<div class='detail-value inline-barb-container'>{wind_barb_inline_detail} {now.get('wd','—')} ({_wdir}°)</div>", unsafe_allow_html=True)
         
         # Row 3: Location Details (Moved here)
@@ -754,7 +845,7 @@ try:
         # Generate inline wind barb for QAM report (slightly smaller)
         wind_barb_inline_qam = generate_inline_wind_barb_html(_wdir, _wspd, size=20)
         
-        # 📌 PERUBAHAN DI SINI: Menyertakan Wind Barb inline dalam wind_info_qam
+        # Menyertakan Wind Barb inline dalam wind_info_qam
         wind_info_qam = f"<div class='inline-barb-container' style='font-size: 1.0rem; margin-left: -5px;'>{wind_barb_inline_qam} {_wdir}° / {_wspd:.1f} KT</div>"
         wind_variation = "Not available (BMKG Forecast - No Variation Data)"  
         ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
