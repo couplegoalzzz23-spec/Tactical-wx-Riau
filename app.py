@@ -41,6 +41,8 @@ TRANSLATIONS = {
         "about_system": "1. Tentang Sistem Ini",
         "data_source_limits": "2. Sumber Data dan Batasan",
         "key_features": "3. Fitur Kunci",
+        "select_location_header": "Pilih Lokasi", # <-- Teks yang ditambahkan
+        "location_available": "Lokasi Tersedia", # <-- Teks yang ditambahkan
         # Tambahkan terjemahan lain di sini jika diperlukan
     },
     "EN": {
@@ -62,6 +64,8 @@ TRANSLATIONS = {
         "about_system": "1. About This System",
         "data_source_limits": "2. Data Source and Limitations",
         "key_features": "3. Key Features",
+        "select_location_header": "Select Location", # <-- Teks yang ditambahkan
+        "location_available": "Available Locations", # <-- Teks yang ditambahkan
     }
 }
 
@@ -608,8 +612,7 @@ def home_page():
     """)
     
     st.markdown("---")
-    st.caption(f"Versi Aplikasi: v4.0 | Waktu Muat: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} WIB")
-
+    st.caption(f"Versi Aplikasi: v4.1 | Waktu Muat: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} WIB") # V4.1
 
 # =====================================
 # 🌐 LANGUAGE SELECTOR UI (TOP RIGHT)
@@ -677,7 +680,7 @@ with st.sidebar:
         show_qam_report = False
 
     st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v4.0")
+    st.caption("Data Source: BMKG API · Military Ops v4.1") # V4.1
 
 
 # =====================================
@@ -714,10 +717,12 @@ try:
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.subheader("Pilih Lokasi")
+        # PENGGUNAAN get_text() UNTUK JUDUL SUBHEADER
+        st.subheader(get_text("select_location_header")) 
         loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()), label_visibility="collapsed")
     with col2:
-        st.metric("📍 Lokasi Tersedia", len(mapping))
+        # PENGGUNAAN get_text() UNTUK LABEL METRIC
+        st.metric(f"📍 {get_text('location_available')}", len(mapping)) 
 
     selected_entry = mapping[loc_choice]["entry"]
     df = flatten_cuaca_entry(selected_entry)
