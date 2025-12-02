@@ -12,9 +12,73 @@ from datetime import datetime
 st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =====================================
+# 🌐 TRANSLATION DICTIONARY
+# =====================================
+# Define language options and their corresponding keys
+LANGUAGES = {
+    "Bahasa Indonesia 🇮🇩": "ID",
+    "English (US) 🇺🇸": "EN"
+}
+
+# Core application texts translated (minimal set for demonstration)
+TRANSLATIONS = {
+    "ID": {
+        "title_main": "Tactical Weather Operations Dashboard",
+        "title_subtitle": "Sumber: BMKG Forecast API — Data Langsung",
+        "nav_home": "Beranda (Info)",
+        "nav_dashboard": "Dasbor (Operasi Langsung)",
+        "sidebar_controls": "🛰️ Kontrol Taktis",
+        "dashboard_config": "Konfigurasi Dasbor",
+        "fetch_data": "🔄 Ambil Data",
+        "show_map": "Tampilkan Peta",
+        "show_table": "Tampilkan Tabel (Data Mentah)",
+        "show_qam": "Tampilkan Laporan MET (QAM)",
+        "home_page_title": "Selamat Datang di Dasbor Operasi Cuaca Taktis",
+        "warning_title": "PERINGATAN OPERASIONAL:",
+        "warning_text_1": "Data ini bersumber dari",
+        "warning_text_2": ". Ini adalah",
+        "warning_text_3": "(FORECAST), bukan Observasi Real-Time (METAR). Gunakan untuk perencanaan, bukan untuk keputusan Take-Off/Landing final tanpa data METAR/AWOS aktual.",
+        "about_system": "1. Tentang Sistem Ini",
+        "data_source_limits": "2. Sumber Data dan Batasan",
+        "key_features": "3. Fitur Kunci",
+        # Tambahkan terjemahan lain di sini jika diperlukan
+    },
+    "EN": {
+        "title_main": "Tactical Weather Operations Dashboard",
+        "title_subtitle": "Source: BMKG Forecast API — Live Data",
+        "nav_home": "Home (Info)",
+        "nav_dashboard": "Dashboard (Live Ops)",
+        "sidebar_controls": "🛰️ Tactical Controls",
+        "dashboard_config": "Dashboard Configuration",
+        "fetch_data": "🔄 Fetch Data",
+        "show_map": "Show Map",
+        "show_table": "Show Table (Raw Data)",
+        "show_qam": "Show MET Report (QAM)",
+        "home_page_title": "Welcome to the Tactical Weather Operations Dashboard",
+        "warning_title": "OPERATIONAL WARNING:",
+        "warning_text_1": "This data is sourced from the",
+        "warning_text_2": ". This is a",
+        "warning_text_3": "(FORECAST), not Real-Time Observation (METAR). Use for planning, not for final Take-Off/Landing decisions without actual METAR/AWOS data.",
+        "about_system": "1. About This System",
+        "data_source_limits": "2. Data Source and Limitations",
+        "key_features": "3. Key Features",
+    }
+}
+
+# Set default language if not in session state
+if 'language' not in st.session_state:
+    st.session_state['language'] = "ID"
+
+# Helper function to get translated text
+def get_text(key):
+    lang_key = st.session_state['language']
+    # Fallback logic: 1. Selected Lang -> 2. ID Lang -> 3. Key as string
+    return TRANSLATIONS.get(lang_key, TRANSLATIONS['ID']).get(key, TRANSLATIONS['ID'].get(key, key))
+
+
+# =====================================
 # 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL + MET REPORT TABLE
 # =====================================
-
 # Menyimpan CSS styling untuk digunakan dalam file HTML QAM yang diunduh
 CSS_STYLES = """
 <style>
@@ -98,7 +162,7 @@ body {
 </style>
 """
 
-# Menyuntikkan seluruh CSS ke Streamlit (termasuk yang tidak relevan untuk QAM, untuk tampilan dashboard)
+# Menyuntikkan seluruh CSS ke Streamlit
 st.markdown(CSS_STYLES + """
 <style>
 /* CSS Streamlit Khusus */
@@ -509,21 +573,24 @@ def badge_html(status):
 # 🏠 HOME PAGE FUNCTION (NEW)
 # =====================================
 def home_page():
-    st.title("Welcome to the Tactical Weather Operations Dashboard")
+    # Menggunakan terjemahan
+    st.title(get_text("home_page_title"))
     
     # Operational Warning (MOVED HERE)
-    st.markdown("""
+    st.markdown(f"""
     <div style='background-color: #3a2a1f; color: #ffd86b; padding: 15px; border-radius: 6px; margin-bottom: 30px; border: 1px solid #ffaa00; font-size: 1.1rem;'>
-        ⚠️ <strong style='color: #fff;'>PERINGATAN OPERASIONAL:</strong> Data ini bersumber dari <strong style='color: #fff;'>BMKG FORECAST API</strong>. Ini adalah <strong style='color: #fff;'>RAMALAN (FORECAST)</strong>, bukan Observasi Real-Time (METAR). Gunakan untuk perencanaan, bukan untuk keputusan Take-Off/Landing final tanpa data METAR/AWOS aktual.
+        ⚠️ <strong style='color: #fff;'>{get_text('warning_title')}</strong> {get_text('warning_text_1')} <strong style='color: #fff;'>BMKG FORECAST API</strong>{get_text('warning_text_2')} <strong style='color: #fff;'>RAMALAN</strong> {get_text('warning_text_3')}
     </div>
     """, unsafe_allow_html=True)
     
-    st.header("1. Tentang Sistem Ini")
+    # Bagian 1: Tentang Sistem Ini
+    st.header(get_text("about_system"))
     st.markdown("""
     Sistem **Tactical Weather Operations Dashboard** ini dikembangkan untuk menyediakan analisis prakiraan cuaca meteorologi secara cepat. Data bersumber dari BMKG (Badan Meteorologi, Klimatologi, dan Geofisika) dan disajikan dalam format visual operasional untuk mendukung perencanaan penerbangan.
     """)
     
-    st.header("2. Sumber Data dan Batasan")
+    # Bagian 2: Sumber Data dan Batasan
+    st.header(get_text("data_source_limits"))
     st.markdown("""
     * **Sumber Data:** BMKG Public API for Regional Forecasts.
     * **Jenis Data:** Prakiraan (Forecast) 3-jam ke depan.
@@ -531,7 +598,8 @@ def home_page():
     * **Estimasi:** Nilai seperti Dew Point dan Batas Dasar Awan (Ceiling) adalah hasil perhitungan **estimasi** berdasarkan data yang tersedia, bukan observasi langsung.
     """)
     
-    st.header("3. Fitur Kunci")
+    # Bagian 3: Fitur Kunci
+    st.header(get_text("key_features"))
     st.markdown("""
     * **F-16 Tactical HUD:** Visualisasi cepat status cuaca kritis termasuk angin (menggunakan Wind Barb), visibilitas, dan ketinggian dasar awan.
     * **Operational Decision Matrix:** Klasifikasi otomatis kondisi penerbangan (VFR/MVFR/IFR) dan rekomendasi Take-Off/Landing.
@@ -540,32 +608,63 @@ def home_page():
     """)
     
     st.markdown("---")
-    st.caption(f"Versi Aplikasi: v3.1 | Waktu Muat: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} WIB")
+    st.caption(f"Versi Aplikasi: v4.0 | Waktu Muat: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} WIB")
+
+
+# =====================================
+# 🌐 LANGUAGE SELECTOR UI (TOP RIGHT)
+# =====================================
+# Gunakan kolom untuk menempatkan pemilih bahasa di kanan atas
+lang_col_left, lang_col_right = st.columns([0.8, 0.2])
+
+with lang_col_right:
+    # Mendapatkan nama tampilan bahasa yang saat ini dipilih
+    current_lang_display = next((k for k, v in LANGUAGES.items() if v == st.session_state['language']), "Bahasa Indonesia 🇮🇩")
+    
+    # Selectbox untuk memilih bahasa
+    selected_lang_display = st.selectbox(
+        "Language", 
+        options=list(LANGUAGES.keys()), 
+        index=list(LANGUAGES.keys()).index(current_lang_display),
+        label_visibility="collapsed", # Sembunyikan label "Language"
+        key="language_select_ui"
+    )
+    # Update session state saat pilihan berubah
+    st.session_state['language'] = LANGUAGES[selected_lang_display]
 
 
 # =====================================
 # 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
 # =====================================
 with st.sidebar:
-    st.title("🛰️ Tactical Controls")
+    # Menggunakan terjemahan
+    st.title(get_text("sidebar_controls"))
     
-    # 📌 PERUBAHAN UTAMA: Kontrol Navigasi
-    page_choice = st.radio("Navigation", ["Home (Info)", "Dashboard (Live Ops)"], index=1, key="nav_radio")
+    # 📌 KONTROL NAVIGASI
+    nav_options = [get_text("nav_home"), get_text("nav_dashboard")]
+    
+    # Tentukan index awal yang benar (default ke Dasbor)
+    default_index = nav_options.index(get_text("nav_dashboard")) if get_text("nav_dashboard") in nav_options else 1
+    
+    page_choice = st.radio("Navigation", nav_options, index=default_index, key="nav_radio")
     st.markdown("---")
     
-    if page_choice == "Dashboard (Live Ops)":
-        st.subheader("Dashboard Configuration")
+    # Menggunakan terjemahan untuk perbandingan
+    if page_choice == get_text("nav_dashboard"):
+        # Menggunakan terjemahan
+        st.subheader(get_text("dashboard_config"))
         adm1 = st.text_input("Province Code (ADM1)", value="32", key="adm1_input")
         icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4, key="icao_input")
         st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
-        st.button("🔄 Fetch Data", key="fetch_button")
+        # Menggunakan terjemahan
+        st.button(get_text("fetch_data"), key="fetch_button")
         st.markdown("---")
         
-        # Kontrol Tampilan
-        show_map = st.checkbox("Show Map", value=True)
-        show_table = st.checkbox("Show Table (Raw Data)", value=False)
-        show_qam_report = st.checkbox("Show MET Report (QAM)", value=True)
+        # Menggunakan terjemahan
+        show_map = st.checkbox(get_text("show_map"), value=True)
+        show_table = st.checkbox(get_text("show_table"), value=False)
+        show_qam_report = st.checkbox(get_text("show_qam"), value=True)
         
         # Slider Waktu (Hanya muncul jika Dashboard dipilih dan data ada)
         # Akan didefinisikan kemudian setelah data dimuat
@@ -578,21 +677,23 @@ with st.sidebar:
         show_qam_report = False
 
     st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v3.1")
+    st.caption("Data Source: BMKG API · Military Ops v4.0")
 
 
 # =====================================
-# 🖥️ MAIN CONTROL BLOCK (NEW)
+# 🖥️ MAIN CONTROL BLOCK
 # =====================================
 
-if page_choice == "Home (Info)":
+# Menggunakan terjemahan untuk perbandingan
+if page_choice == get_text("nav_home"):
     home_page()
     st.stop() # Stop further execution for Home page
 
 # --- BLOCK BELOW IS FOR DASHBOARD (LIVE OPS) ---
 
-st.title("Tactical Weather Operations Dashboard")
-st.markdown("*Source: BMKG Forecast API — Live Data*")
+# Menggunakan terjemahan
+st.title(get_text("title_main"))
+st.markdown(f"*{get_text('title_subtitle')}*")
 
 
 # BLOK TRY DIMULAI DI SINI
@@ -613,9 +714,10 @@ try:
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
+        st.subheader("Pilih Lokasi")
+        loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()), label_visibility="collapsed")
     with col2:
-        st.metric("📍 Locations", len(mapping))
+        st.metric("📍 Lokasi Tersedia", len(mapping))
 
     selected_entry = mapping[loc_choice]["entry"]
     df = flatten_cuaca_entry(selected_entry)
@@ -651,7 +753,7 @@ try:
 
     # slider only when datetime exists
     if use_col:
-        # Memindahkan slider ke Sidebar (di dalam blok if page_choice == "Dashboard (Live Ops)")
+        # Memindahkan slider ke Sidebar
         with st.sidebar:
             st.markdown("---")
             start_dt = st.slider(
