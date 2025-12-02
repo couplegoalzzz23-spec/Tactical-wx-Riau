@@ -231,15 +231,15 @@ hr, .stDivider {
     fill: none;
     filter: drop-shadow(0 0 6px #0f0);
 }
-#hud-wind-arrow {
-    stroke-width: 3;
+/* Wind Barb specific styles */
+.wind-barb-line {
+    stroke: #0f0;
+    stroke-width: 2.5;
+    fill: none;
     stroke-linecap: round;
-    animation: windPulse 1.8s infinite ease-in-out;
 }
-@keyframes windPulse {
-    0%   { stroke-opacity: 0.4; }
-    50%  { stroke-opacity: 1.0; }
-    100% { stroke-opacity: 0.4; }
+.wind-barb-flag {
+    fill: #0f0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -264,6 +264,63 @@ def safe_int(val, default=0):
         return int(round(float(val)))
     except Exception:
         return default
+
+# Fungsi baru: Menghasilkan kode SVG Wind Barb
+def generate_wind_barb_svg(wdir, wspd_kt, center_x, center_y, scale=1.0):
+    if wspd_kt < 2.5: # Kurang dari 2 knot, anggap Calm (tidak digambar atau digambar simbol Calm)
+        return f'<circle cx="{center_x}" cy="{center_y}" r="{5*scale}" class="hud-glow" fill="none" stroke="#0f0" stroke-width="2"/>' # Simbol Calm
+    
+    # Konversi arah angin (dari mana angin bertiup) ke arah barbs (ke mana angin menuju)
+    # Arah angin diukur clockwise dari Utara (0 derajat).
+    # Di SVG, Y ke bawah. Kita gunakan rotasi normal: 0=Atas, 90=Kanan, 180=Bawah, 270=Kiri.
+    # WDIR = Arah dari mana angin datang. Kita perlu rotasi agar barbs menunjuk ke WDIR.
+    
+    # Rotasi: Rotasi di SVG diukur clockwise. WDIR 0 (Utara) berarti barbs menunjuk ke atas.
+    # Rotasi total untuk membuat barb menunjuk ke arah datangnya angin (WDIR)
+    rotation_angle = wdir - 180 # Barbs harus berada di sisi datangnya angin (WDIR - 180 derajat)
+    
+    barb_length = 30 * scale # Panjang garis utama barb
+    
+    # Barbs digambar dari center_y ke atas (utara)
+    # y_end adalah titik terminal barb (ujung yang menjauh dari pusat)
+    y_end = center_y - barb_length
+
+    # SVG untuk Barb: Semua dirotasi
+    svg_barb = f'<g transform="translate({center_x}, {center_y}) rotate({rotation_angle})">'
+    
+    # Garis utama barb (menunjuk ke atas setelah rotasi)
+    svg_barb += f'<line x1="0" y1="0" x2="0" y2="{-barb_length}" class="wind-barb-line"/>'
+    
+    # Posisi awal untuk 'feathers' (dari titik akhir, y_end = -barb_length)
+    y_feather_start = -barb_length
+    
+    # Variabel untuk offset y
+    y_offset = 0
+
+    # Logika menggambar Feathers (Bendera 50 KT, Penuh 10 KT, Setengah 5 KT)
+    remaining_wspd = wspd_kt
+    
+    # 1. Bendera (Flag) 50 KT: Setiap bendera mewakili 50 knot
+    while remaining_wspd >= 47.5: # Ambil 50 knot
+        # Gambar bendera (segitiga di ujung garis)
+        svg_barb += f'<polygon points="0, {y_feather_start + y_offset} 6, {y_feather_start + y_offset + 5} 0, {y_feather_start + y_offset + 10}" class="wind-barb-flag"/>'
+        y_offset += 10 # Pindah ke bawah untuk barb berikutnya
+        remaining_wspd -= 50
+    
+    # 2. Barbs Penuh (Full Barb) 10 KT: Setiap barb penuh mewakili 10 knot
+    while remaining_wspd >= 7.5: # Ambil 10 knot
+        # Garis penuh (panjang ~10)
+        svg_barb += f'<line x1="0" y1="{y_feather_start + y_offset}" x2="10" y2="{y_feather_start + y_offset + 5}" class="wind-barb-line"/>'
+        y_offset += 7 # Pindah ke bawah
+        remaining_wspd -= 10
+        
+    # 3. Barbs Setengah (Half Barb) 5 KT: Setengah mewakili 5 knot
+    if remaining_wspd >= 2.5: # Ambil 5 knot
+        # Garis setengah (panjang ~5)
+        svg_barb += f'<line x1="0" y1="{y_feather_start + y_offset}" x2="5" y2="{y_feather_start + y_offset + 2.5}" class="wind-barb-line"/>'
+    
+    svg_barb += '</g>'
+    return svg_barb
 
 # Day/night control in sidebar (hybrid Auto + manual override)
 with st.sidebar:
@@ -431,7 +488,12 @@ with st.sidebar:
 # 📡 LOAD DATA
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
-st.markdown("*Source: BMKG Forecast API — Live Data*")
+# PERINGATAN BARU: Menekankan perbedaan Forecast vs Observation
+st.markdown("""
+<div style='background-color: #3a2a1f; color: #ffd86b; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ffaa00;'>
+    ⚠️ <strong style='color: #fff;'>PERINGATAN OPERASIONAL:</strong> Data ini bersumber dari <strong style='color: #fff;'>BMKG FORECAST API</strong>. Ini adalah <strong style='color: #fff;'>RAMALAN (FORECAST)</strong>, bukan Observasi Real-Time (METAR). Gunakan untuk perencanaan, bukan untuk keputusan Take-Off/Landing final tanpa data METAR/AWOS aktual.
+</div>
+""", unsafe_allow_html=True)
 
 # BLOK TRY DIMULAI DI SINI
 try:
@@ -563,32 +625,26 @@ try:
     _vis = safe_int(now.get("vs"), default=0)
     _ceil = safe_int(ceiling_est_ft, default=0)
 
-    # limit wind arrow length so it fits nicely
-    max_arrow_len = 120
-    arrow_len = min(max_arrow_len, int(_wspd * 3))  # scaling factor for visibility in HUD
+    # Generate Wind Barb SVG
+    wind_barb_svg_code = generate_wind_barb_svg(
+        wdir=_wdir, 
+        wspd_kt=_wspd, 
+        center_x=400, 
+        center_y=150, 
+        scale=1.0
+    )
 
-    # Compute end point of arrow relative to center (400,150) used below
-    dx = np.sin(np.radians(_wdir)) * arrow_len
-    dy = -np.cos(np.radians(_wdir)) * arrow_len  # negative because SVG Y increases downward
 
     hud_svg = f"""
     <svg id="f16hud-svg" viewBox="0 0 800 300" preserveAspectRatio="xMidYMid meet">
-      <!-- Horizon -->
       <line x1="50" y1="150" x2="750" y2="150" class="hud-glow" stroke="#0f0" stroke-width="1.5"/>
-      <!-- Pitch Ladder short marks -->
       <line x1="140" y1="120" x2="200" y2="120" class="hud-glow" stroke="#0f0" stroke-width="1"/>
       <line x1="140" y1="180" x2="200" y2="180" class="hud-glow" stroke="#0f0" stroke-width="1"/>
-      <!-- Heading -->
       <text x="400" y="42" fill="#0f0" font-size="22" text-anchor="middle">HDG {_wdir:03d}°</text>
-      <!-- Wind arrow from center -->
-      <line id="hud-wind-arrow" x1="400" y1="150" x2="{400 + dx:.1f}" y2="{150 + dy:.1f}" stroke="#0f0" />
-      <polygon points="{400 + dx:.1f},{150 + dy:.1f} {400 + dx - 6:.1f},{150 + dy - 6:.1f} {400 + dx + 6:.1f},{150 + dy - 6:.1f}" fill="#0f0"/>
-      <!-- Wind readout -->
+      {wind_barb_svg_code}
       <text x="400" y="190" fill="#0f0" font-size="18" text-anchor="middle">WIND {_wdir}° / {_wspd:.1f} KT</text>
-      <!-- Visibility and Ceiling -->
       <text x="120" y="260" fill="#0f0" font-size="16">VIS: {_vis} m ({convert_vis_to_sm(_vis)})</text>
       <text x="680" y="260" fill="#0f0" font-size="16" text-anchor="end">CEIL: {_ceil} ft</text>
-      <!-- Tactical quick statuses -->
       <rect x="18" y="18" width="110" height="28" fill="rgba(0,0,0,0.3)" stroke="#0f0" rx="6"/>
       <text x="74" y="36" fill="#0f0" font-size="12" text-anchor="middle">TACTICAL</text>
     </svg>
@@ -680,7 +736,7 @@ try:
         # prepare MET REPORT values
         visibility_m = now.get('vs')
         wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
-        wind_variation = "Not available (BMKG Forecast)"  
+        wind_variation = "Not available (BMKG Forecast - No Variation Data)"  # Diperbarui
         ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
 
 
@@ -693,7 +749,7 @@ try:
             <table class="met-report-table">
                 <tr>
                     <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
-                    <td>{now.get('local_datetime','—')} (Local) / {now.get('utc_datetime','—')} (UTC)</td>
+                    <td>{now.get('local_datetime','—')} (Local) / {now.get('utc_datetime','—')} (UTC) <span style='font-size: 0.75rem; color:#ffd86b;'>(FORECAST DATA)</span></td>
                 </tr>
                 <tr>
                     <th>AERODROME IDENTIFICATION</th>
@@ -708,7 +764,7 @@ try:
                     <td>{visibility_m} m ({vis_sm_disp}) / {now.get('vs_text','—')}</td> </tr>
                 <tr>
                     <th>RUNWAY VISUAL RANGE</th>
-                    <td>— (RVR not available)</td>
+                    <td>— (RVR not available from Forecast)</td>
                 </tr>
                 <tr>
                     <th>PRESENT WEATHER</th>
@@ -716,7 +772,7 @@ try:
                 </tr>
                 <tr>
                     <th>AMOUNT AND HEIGHT OF BASE OF LOW CLOUD</th>
-                    <td>Cloud Cover: {now.get('tcc','—')}% / {ceiling_full_desc}</td>
+                    <td>Cloud Cover: {now.get('tcc','—')}% / {ceiling_full_desc} <span style='font-size: 0.75rem; color:#ffd86b;'>(ESTIMATED BASE)</span></td>
                 </tr>
                 <tr>
                     <th>AIR TEMPERATURE AND DEW POINT TEMPERATURE</th>
