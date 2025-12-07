@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta # timedelta ditambahkan untuk perhitungan waktu yang aman
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
@@ -18,7 +18,7 @@ st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 # Menyimpan CSS styling untuk digunakan dalam file HTML QAM yang diunduh
 CSS_STYLES = """
 <style>
-/* Base theme */
+/* Base theme (DEFAULT: NIGHT MODE/MILITARY STYLE) */
 body {
     background-color: #0b0c0c;
     color: #cfd2c3;
@@ -94,6 +94,107 @@ body {
     font-size: 0.9rem;
     text-transform: uppercase;
     margin-bottom: 8px;
+}
+/* -----------------------------
+   HUD wrapper specific styles
+   ----------------------------- */
+#f16hud-wrapper[data-mode='day'] #f16hud-container {
+    background: rgba(200, 255, 200, 0.12);
+    border-color: #7fbf7f;
+    box-shadow: 0 0 10px #7f7 inset;
+}
+#f16hud-wrapper[data-mode='night'] #f16hud-container {
+    background: rgba(0, 10, 0, 0.75);
+    border-color: #0f0;
+    box-shadow: 0 0 20px #0f0 inset;
+}
+#f16hud-container {
+    width: 100%;
+    background: rgba(0, 10, 0, 0.70);
+    border: 1px solid #1f3;
+    border-radius: 12px;
+    padding: 12px;
+    margin-top: 18px;
+    box-shadow: 0 0 15px #0f0 inset;
+}
+#f16hud-title {
+    color: #0f0;
+    font-size: 1.05rem;
+    text-align: center;
+    margin-bottom: 8px;
+    text-shadow: 0 0 6px #0f0;
+}
+/* -----------------------------
+   GLOBAL DAY MODE OVERRIDE (SOLUSI)
+   Menggunakan sibling selector (~) untuk menargetkan elemen Streamlit utama
+   ----------------------------- */
+/* Target elemen Streamlit utama (.stApp) dan konten di dalamnya untuk Day Mode */
+#f16hud-wrapper[data-mode='day'] ~ .stApp .main {
+    background-color: #f0f0f0 !important; /* Latar belakang cerah */
+    color: #333333 !important; /* Teks gelap */
+}
+/* Streamlit root container */
+#f16hud-wrapper[data-mode='day'] ~ .stApp > div {
+    background-color: #f0f0f0 !important;
+}
+
+/* Target Header dan Sidebar untuk Day Mode */
+#f16hud-wrapper[data-mode='day'] ~ .stApp > header,
+#f16hud-wrapper[data-mode='day'] ~ .stApp section[data-testid="stSidebar"] {
+    background-color: #ffffff !important; /* Latar belakang header/sidebar putih */
+    color: #111 !important;
+}
+/* Target Teks Sidebar */
+#f16hud-wrapper[data-mode='day'] ~ .stApp section[data-testid="stSidebar"] * {
+    color: #333333 !important;
+}
+
+/* Target Judul */
+#f16hud-wrapper[data-mode='day'] ~ .stApp h1,
+#f16hud-wrapper[data-mode='day'] ~ .stApp h2,
+#f16hud-wrapper[data-mode='day'] ~ .stApp h3,
+#f16hud-wrapper[data-mode='day'] ~ .stApp h4 {
+    color: #004d00 !important; /* Judul menjadi hijau gelap */
+}
+
+/* Teks kecil dan metrik label di Day Mode */
+#f16hud-wrapper[data-mode='day'] ~ .stApp .small-note,
+#f16hud-wrapper[data-mode='day'] ~ .stApp .metric-label {
+    color: #666666 !important;
+}
+
+/* Penerapan tema cerah pada kartu penerbangan dan tabel laporan MET */
+#f16hud-wrapper[data-mode='day'] ~ .stApp .flight-card {
+    background-color: #e8e8e8 !important; /* Kartu menjadi abu-abu cerah */
+    border-color: #cccccc !important;
+}
+#f16hud-wrapper[data-mode='day'] ~ .stApp .met-report-table {
+    background-color: #e8e8e8 !important;
+    border-color: #cccccc !important;
+}
+#f16hud-wrapper[data-mode='day'] ~ .stApp .met-report-table th {
+    background-color: #cccccc !important;
+    color: #004d00 !important;
+}
+#f16hud-wrapper[data-mode='day'] ~ .stApp .met-report-table td {
+    color: #111111 !important;
+}
+
+/* Warna Judul di kartu */
+#f16hud-wrapper[data-mode='day'] ~ .stApp .flight-title {
+    color: #006400 !important; /* Hijau gelap */
+}
+
+/* Warna nilai metrik */
+#f16hud-wrapper[data-mode='day'] ~ .stApp .metric-value,
+#f16hud-wrapper[data-mode='day'] ~ .stApp .detail-value {
+    color: #006400 !important; /* Hijau gelap */
+}
+
+/* Garis pemisah */
+#f16hud-wrapper[data-mode='day'] ~ .stApp hr,
+#f16hud-wrapper[data-mode='day'] ~ .stApp .stDivider {
+    border-top-color: #cccccc !important;
 }
 
 </style>
@@ -190,35 +291,7 @@ hr, .stDivider {
     font-weight: bold;
 }
 
-/* -----------------------------
-   HUD wrapper specific styles
-   ----------------------------- */
-#f16hud-wrapper[data-mode='day'] #f16hud-container {
-    background: rgba(200, 255, 200, 0.12);
-    border-color: #7fbf7f;
-    box-shadow: 0 0 10px #7f7 inset;
-}
-#f16hud-wrapper[data-mode='night'] #f16hud-container {
-    background: rgba(0, 10, 0, 0.75);
-    border-color: #0f0;
-    box-shadow: 0 0 20px #0f0 inset;
-}
-#f16hud-container {
-    width: 100%;
-    background: rgba(0, 10, 0, 0.70);
-    border: 1px solid #1f3;
-    border-radius: 12px;
-    padding: 12px;
-    margin-top: 18px;
-    box-shadow: 0 0 15px #0f0 inset;
-}
-#f16hud-title {
-    color: #0f0;
-    font-size: 1.05rem;
-    text-align: center;
-    margin-bottom: 8px;
-    text-shadow: 0 0 6px #0f0;
-}
+/* HUD styles (diulang di sini karena berada di luar blok CSS_STYLES awal) */
 #f16hud-svg {
     width: 100%;
     height: 220px;
@@ -269,9 +342,26 @@ def safe_int(val, default=0):
 # NOTE: Karena override_mode adalah input Streamlit, harus didefinisikan di luar fungsi
 # untuk memastikan state-nya terpelihara saat re-run.
 with st.sidebar:
+    st.title("🛰️ Tactical Controls")
+    adm1 = st.text_input("Province Code (ADM1)", value="32")
+    icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
+    st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
+    # Tombol ini hanya memicu rerun, bukan memuat data secara eksplisit di sini
+    if st.button("🔄 Fetch Data"):
+        st.session_state["rerun_trigger"] = True
+    else:
+        st.session_state["rerun_trigger"] = False
+        
     st.markdown("---")
     st.subheader("🌗 Display Mode")
     override_mode = st.selectbox("Override Mode", ["Auto", "Day", "Night"], index=0)
+    # Kontrol Tampilan
+    show_map = st.checkbox("Show Map", value=True)
+    show_table = st.checkbox("Show Table (Raw Data)", value=False)
+    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
+    st.markdown("---")
+    st.caption("Data Source: BMKG API · Military Ops v2.2")
 
 # Dipindahkan ke luar sidebar, didefinisikan setelah override_mode
 def get_day_night_mode(mode_choice):
@@ -445,25 +535,7 @@ now = pd.Series({})
 icao_code = "WXXX" # Default value
 loc_choice = "—" # Default value
 
-with st.sidebar:
-    st.title("🛰️ Tactical Controls")
-    adm1 = st.text_input("Province Code (ADM1)", value="32")
-    icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
-    st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
-    # Tombol ini hanya memicu rerun, bukan memuat data secara eksplisit di sini
-    if st.button("🔄 Fetch Data"):
-        st.session_state["rerun_trigger"] = True
-    else:
-        st.session_state["rerun_trigger"] = False
-        
-    st.markdown("---")
-    # Kontrol Tampilan
-    show_map = st.checkbox("Show Map", value=True)
-    show_table = st.checkbox("Show Table (Raw Data)", value=False)
-    show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
-    st.markdown("---")
-    st.caption("Data Source: BMKG API · Military Ops v2.2")
+# Sidebar didefinisikan di atas (sebelum fungsi get_day_night_mode)
 
 # =====================================
 # 📡 LOAD DATA
@@ -730,7 +802,7 @@ try:
             st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value'>{tcc_val:.0f}%</div>", unsafe_allow_html=True)
         with col_wx:
-            st.markdown("<div class='metric-label'>Present Weather</div>", unsafe_allow_html=True)
+            st.markdown("<div classs='metric-label'>Present Weather</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value'>{weather_desc_val} ({weather_val})</div>", unsafe_allow_html=True)
         
         # Row 3: Time Index/Local Time
