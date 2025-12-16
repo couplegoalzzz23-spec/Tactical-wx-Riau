@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 # =====================================
 # ⚙️ KONFIGURASI DASAR
 # =====================================
-st.set_page_config(page_title="Tactical Weather Ops — BMKG (Revised API)", layout="wide")
+st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =====================================
-# 🌑 CSS — MILITARY STYLE
+# 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL + MET REPORT TABLE
 # =====================================
 
 # Menyimpan CSS styling untuk digunakan dalam file HTML QAM yang diunduh
@@ -245,7 +245,7 @@ hr, .stDivider {
 """, unsafe_allow_html=True)
 
 # =====================================
-# 🟢 HUD + DAY/NIGHT LOGIC
+# 🟢 HUD + DAY/NIGHT LOGIC (ADDITIONAL BLOCKS)
 # =====================================
 
 # Helper: safe numeric getters to avoid formatting errors
@@ -266,11 +266,14 @@ def safe_int(val, default=0):
         return default
 
 # Day/night control in sidebar (hybrid Auto + manual override)
+# NOTE: Karena override_mode adalah input Streamlit, harus didefinisikan di luar fungsi
+# untuk memastikan state-nya terpelihara saat re-run.
 with st.sidebar:
     st.markdown("---")
     st.subheader("🌗 Display Mode")
     override_mode = st.selectbox("Override Mode", ["Auto", "Day", "Night"], index=0)
 
+# Dipindahkan ke luar sidebar, didefinisikan setelah override_mode
 def get_day_night_mode(mode_choice):
     if mode_choice == "Day": return "day"
     if mode_choice == "Night": return "night"
@@ -281,10 +284,9 @@ def get_day_night_mode(mode_choice):
 CURRENT_MODE = get_day_night_mode(override_mode)
 
 # =====================================
-# 📡 KONFIGURASI API (DIPERBARUI)
+# 📡 KONFIGURASI API
 # =====================================
-# Mengganti ke API Data Terbuka BMKG yang resmi
-API_BASE = "https://api.bmkg.go.id/publik/prakiraan-cuaca" 
+API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384 # konversi ke knot
 METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
 
@@ -292,46 +294,30 @@ METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
 # 🧰 UTILITAS
 # =====================================
 @st.cache_data(ttl=300)
-# Mengubah parameter ke adm4_code dan menggunakan adm4 di params
-def fetch_forecast(adm4_code: str):
-    params = {"adm4": adm4_code} 
+def fetch_forecast(adm1: str):
+    params = {"adm1": adm1}
     resp = requests.get(API_BASE, params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
-# Mengubah fungsi flatten agar sesuai dengan struktur API Data Terbuka
-def flatten_forecast_list(raw_data: dict):
-    # API baru memiliki list forecast di key 'data'
-    forecast_list = raw_data.get("data", [])
+def flatten_cuaca_entry(entry):
     rows = []
-    
-    for obs in forecast_list:
-        r = obs.copy()
-        
-        # Nama key datetime berbeda di API baru (menggunakan 'datetime')
-        dt_str = r.get("datetime")
-        if dt_str:
-            # Format: YYYYMMDDHHmmss. Asumsi UTC dari BMKG, dikonversi ke WIB (Asia/Jakarta)
-            r["utc_datetime_dt"] = pd.to_datetime(dt_str, format='%Y%m%d%H%M%S', errors="coerce", utc=True)
-            r["local_datetime_dt"] = r["utc_datetime_dt"].dt.tz_convert('Asia/Jakarta')
-            r["utc_datetime"] = r["utc_datetime_dt"].dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-            r["local_datetime"] = r["local_datetime_dt"].dt.strftime('%Y-%m-%d %H:%M:%S WIB')
-        else:
-            r["utc_datetime_dt"] = pd.NaT
-            r["local_datetime_dt"] = pd.NaT
-            r["utc_datetime"] = "—"
-            r["local_datetime"] = "—"
-            
-        # Tambahkan placeholder untuk kolom lokasi yang hilang
-        r["adm1"] = "N/A"
-        r["adm2"] = "N/A"
-        r["provinsi"] = "Unknown Province"
-        r["kotkab"] = "Specific Location"
-        r["lon"] = 0.0
-        r["lat"] = 0.0
-            
-        rows.append(r)
-
+    lokasi = entry.get("lokasi", {})
+    for group in entry.get("cuaca", []):
+        for obs in group:
+            r = obs.copy()
+            r.update({
+                "adm1": lokasi.get("adm1"),
+                "adm2": lokasi.get("adm2"),
+                "provinsi": lokasi.get("provinsi"),
+                "kotkab": lokasi.get("kotkab"),
+                "lon": lokasi.get("lon"),
+                "lat": lokasi.get("lat"),
+            })
+            # safe datetime parse
+            r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
+            r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
+            rows.append(r)
     df = pd.DataFrame(rows)
     # Konversi kolom numerik dengan aman
     for c in ["t","tcc","tp","wd_deg","ws","hu","vs"]:
@@ -341,10 +327,11 @@ def flatten_forecast_list(raw_data: dict):
     # Hitung ws_kt jika 'ws' ada
     if "ws" in df.columns:
         df["ws_kt"] = df["ws"] * MS_TO_KT
+    # Jika 'ws_kt' sudah ada, pastikan itu numerik
     elif "ws_kt" in df.columns:
         df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
     else:
-        df["ws_kt"] = np.nan
+        df["ws_kt"] = np.nan # Tambahkan kolom kosong jika keduanya tidak ada
 
     return df
 
@@ -449,20 +436,18 @@ def badge_html(status):
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
 # =====================================
-# 🎚️ SIDEBAR (SEBELUM DATA DIMUAT) - DIPERBARUI
+# 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
 # =====================================
-# Definisi awal untuk menghindari UnboundLocalError
+# Definisi awal untuk menghindari UnboundLocalError jika terjadi error di try/except
 df = pd.DataFrame()
 df_sel = pd.DataFrame()
 now = pd.Series({}) 
 icao_code = "WXXX" # Default value
-loc_choice = "Specific Location" # Default value
+loc_choice = "—" # Default value
 
 with st.sidebar:
     st.title("🛰️ Tactical Controls")
-    # MENGGANTI DARI ADM1 KE ADM4 CODE
-    # Contoh Kode ADM4: 31.71.03.1001 (Kel. Kemayoran, Jakarta)
-    adm4_code = st.text_input("Village/Kelurahan Code (ADM4)", value="31.71.03.1001")
+    adm1 = st.text_input("Province Code (ADM1)", value="32")
     icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
@@ -478,39 +463,39 @@ with st.sidebar:
     show_table = st.checkbox("Show Table (Raw Data)", value=False)
     show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
     st.markdown("---")
-    st.caption("Data Source: BMKG Open Data API · Military Ops v2.2")
+    st.caption("Data Source: BMKG API · Military Ops v2.2")
 
 # =====================================
-# 📡 LOAD DATA (DIPERBARUI)
+# 📡 LOAD DATA
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
-st.markdown("*Source: BMKG Open Data API — Live Data*")
+st.markdown("*Source: BMKG Forecast API — Live Data*")
 
 # BLOK TRY DIMULAI DI SINI
 try:
-    with st.spinner(f"🛰️ Acquiring weather intelligence for ADM4: {adm4_code}..."):
-        # Panggil dengan kode ADM4
-        raw = fetch_forecast(adm4_code)
+    with st.spinner("🛰️ Acquiring weather intelligence..."):
+        raw = fetch_forecast(adm1)
         
-    # API Data Terbuka langsung mengembalikan list forecast di key 'data'
     entries = raw.get("data", [])
-    
     if not entries:
-        st.error(f"Error: API returned no data for ADM4 code: {adm4_code}. Check if the code is correct.")
-        # Menghentikan eksekusi
+        st.warning("No forecast data available.")
+        # Menghentikan eksekusi setelah warning untuk menghindari error di baris selanjutnya
         st.stop()
 
-    # Hapus logic pemilihan lokasi (mapping, selectbox) karena data sudah spesifik
-    loc_choice = f"ADM4 Code: {adm4_code}" 
+    mapping = {}
+    for e in entries:
+        lok = e.get("lokasi", {})
+        label = lok.get("kotkab") or lok.get("adm2") or f"Location {len(mapping)+1}"
+        mapping[label] = {"entry": e}
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.markdown(f"**🎯 Location Code:** `{adm4_code}`")
+        loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
     with col2:
-        st.metric("📍 Forecast Points", len(entries))
+        st.metric("📍 Locations", len(mapping))
 
-    # Gunakan fungsi flatten yang baru
-    df = flatten_forecast_list(raw)
+    selected_entry = mapping[loc_choice]["entry"]
+    df = flatten_cuaca_entry(selected_entry)
 
     if df.empty:
         st.warning("No valid weather data found for selected location.")
@@ -683,18 +668,17 @@ try:
 
     detail_col1, detail_col2 = st.columns(2)
 
-    # Ambil nilai tambahan dengan aman. Nilai lokasi menggunakan placeholder.
+    # Ambil nilai tambahan dengan aman
     hu_val = now.get('hu','—')
     wd_val = now.get('wd','—')
-    provinsi_val = now.get('provinsi','—') # Placeholder
-    kotkab_val = now.get('kotkab','—') # Placeholder
+    provinsi_val = now.get('provinsi','—')
+    kotkab_val = now.get('kotkab','—')
     local_dt_val = now.get('local_datetime','—')
     utc_dt_val = now.get('utc_datetime','—')
-    # analysis_date tidak ada di API baru, ganti dengan datetime
-    analysis_date_val = now.get('utc_datetime','—') 
+    analysis_date_val = now.get('analysis_date','—')
     weather_val = now.get('weather','—')
-    lat_val = now.get('lat','—') # Placeholder
-    lon_val = now.get('lon','—') # Placeholder
+    lat_val = now.get('lat','—')
+    lon_val = now.get('lon','—')
     
     with detail_col1:
         st.markdown("##### 🌡️ Atmospheric State")
@@ -705,7 +689,7 @@ try:
             st.markdown(f"<div class='detail-value'>{temp_val}°C</div>", unsafe_allow_html=True)
         with col_dp:
             st.markdown("<div class='metric-label'>Dew Point (Est)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div classs='detail-value'>{dewpt_disp}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{dewpt_disp}</div>", unsafe_allow_html=True)
 
         # Row 2: Humidity & Wind Dir Code
         col_hu, col_wd = st.columns(2)
@@ -723,7 +707,7 @@ try:
             st.markdown("<div classs='metric-label'>Province</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{provinsi_val}</div>", unsafe_allow_html=True)
         with col_city:
-            st.markdown("<div class='metric-label'>City/Regency (ADM4 Location)</div>", unsafe_allow_html=True)
+            st.markdown("<div class='metric-label'>City/Regency</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{kotkab_val}</div>", unsafe_allow_html=True)
 
 
@@ -743,9 +727,8 @@ try:
         # Row 2: Cloud Cover & Weather Desc
         col_tcc, col_wx = st.columns(2)
         with col_tcc:
-            tcc_display = f"{tcc_val:.0f}%" if not pd.isna(tcc_val) else "—"
             st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{tcc_display}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{tcc_val:.0f}%</div>", unsafe_allow_html=True)
         with col_wx:
             st.markdown("<div class='metric-label'>Present Weather</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value'>{weather_desc_val} ({weather_val})</div>", unsafe_allow_html=True)
@@ -757,7 +740,7 @@ try:
             st.markdown("<div classs='metric-label'>Local Forecast Time</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{local_dt_val}</div>", unsafe_allow_html=True)
         with col_anal:
-            st.markdown("<div class='metric-label'>Forecast Data Time (UTC)</div>", unsafe_allow_html=True)
+            st.markdown("<div class='metric-label'>Analysis Time (UTC)</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{analysis_date_val}</div>", unsafe_allow_html=True)
 
 
@@ -783,11 +766,11 @@ try:
             <table class="met-report-table">
                 <tr>
                     <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
-                    <td>{local_dt_val} (WIB) / {utc_dt_val} (UTC)</td>
+                    <td>{local_dt_val} (Local) / {utc_dt_val} (UTC)</td>
                 </tr>
                 <tr>
                     <th>AERODROME IDENTIFICATION</th>
-                    <td>{icao_code} / ADM4: {adm4_code}</td>
+                    <td>{icao_code} / {kotkab_val} ({now.get('adm2','—')})</td>
                 </tr>
                 <tr>
                     <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
@@ -806,7 +789,7 @@ try:
                 </tr>
                 <tr>
                     <th>AMOUNT AND HEIGHT OF BASE OF LOW CLOUD</th>
-                    <td>Cloud Cover: {tcc_display} / {ceiling_full_desc}</td>
+                    <td>Cloud Cover: {tcc_val:.0f}% / {ceiling_full_desc}</td>
                 </tr>
                 <tr>
                     <th>AIR TEMPERATURE AND DEW POINT TEMPERATURE</th>
@@ -831,7 +814,7 @@ try:
                 </tr>
                 <tr>
                     <th>SUPPLEMENTARY INFORMATION</th>
-                    <td>{provinsi_val} / Code: {adm4_code} / Lat: {lat_val}, Lon: {lon_val}</td>
+                    <td>{provinsi_val} / Latitude: {lat_val}, Longitude: {lon_val}</td>
                 </tr>
                 <tr>
                     <th>TIME OF ISSUE (UTC) / OBSERVER</th>
@@ -851,7 +834,7 @@ try:
         st.markdown(met_report_html_content, unsafe_allow_html=True)
         
         # Implementasi tombol Download QAM
-        qam_filename = f"MET_REPORT_{adm4_code}_{qam_datetime_safe}.html"
+        qam_filename = f"MET_REPORT_{loc_choice}_{qam_datetime_safe}.html"
         st.download_button(
             label="⬇ Download QAM Report (HTML)",
             data=full_qam_html,
@@ -974,14 +957,13 @@ try:
         st.markdown("---")
         st.subheader("🗺️ Tactical Map")
         try:
-            # Lat dan Lon disetel ke 0.0 karena API baru tidak menyediakannya.
-            # Map akan menampilkan di (0, 0) kecuali Anda mengganti nilai placeholder lat/lon.
-            lat = safe_float(now.get("lat", 0.0))
-            lon = safe_float(now.get("lon", 0.0))
+            # Pastikan lat dan lon adalah float yang valid
+            lat = safe_float(selected_entry.get("lokasi", {}).get("lat", 0))
+            lon = safe_float(selected_entry.get("lokasi", {}).get("lon", 0))
             if lat != 0.0 or lon != 0.0:
                  st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
             else:
-                 st.warning(f"Map coordinates are unavailable for ADM4 code {adm4_code}.")
+                 st.warning("Map coordinates are zero or invalid.")
         except Exception as e:
             st.warning(f"Map unavailable: {e}")
 
@@ -994,7 +976,7 @@ try:
         st.dataframe(df_sel)
 
 # =====================================
-# 💾 EXPORT (DIPERBARUI)
+# 💾 EXPORT
 # =====================================
     st.markdown("---")
     st.subheader("💾 Export Data")
@@ -1003,27 +985,22 @@ try:
         json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
         colA, colB = st.columns(2)
         with colA:
-            # Mengganti adm1 dengan adm4_code
-            st.download_button("⬇ CSV", csv, file_name=f"{adm4_code}_{loc_choice}.csv", mime="text/csv")
+            st.download_button("⬇ CSV", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
         with colB:
-            # Mengganti adm1 dengan adm4_code
-            st.download_button("⬇ JSON", json_text, file_name=f"{adm4_code}_{loc_choice}.json", mime="application/json")
+            st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
     else:
          st.info("No data available to export.")
 
 
-# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY (DIPERBARUI)
+# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY
 except requests.exceptions.HTTPError as e:
-    # HTTPError (e.g., 404 Not Found, 500 Server Error)
-    st.error(f"API Error: Could not fetch data. Check ADM4 Code and ensure the API is operational. Status code: {e.response.status_code}")
-    # st.exception(e) # Uncomment for detailed traceback if needed
+    st.error(f"API Error: Could not fetch data. Check Province Code (ADM1). Status code: {e.response.status_code}")
 except requests.exceptions.ConnectionError:
-    # Connection Error yang diharapkan
-    st.error("Connection Error: Could not connect to BMKG Data Terbuka API. Check your internet connection or the external API status.")
+    st.error("Connection Error: Could not connect to BMKG API.")
 except Exception as e:
-    # Error lain yang tidak terduga.
+    # Error ini akan menangkap error lain yang tidak terduga.
     st.error(f"An unexpected error occurred: {e}")
-    # st.exception(e) # Uncomment for detailed traceback if needed
+    # Optional: st.exception(e) for detailed traceback in debug mode
 
 # =====================================
 # ⚓ FOOTER
@@ -1031,7 +1008,7 @@ except Exception as e:
 st.markdown("""
 ---
 <div style="text-align:center; color:#7a7; font-size:0.9rem;">
-Tactical Weather Ops Dashboard — BMKG Data Terbuka © 2025<br>
+Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
 Military Ops UI · Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
