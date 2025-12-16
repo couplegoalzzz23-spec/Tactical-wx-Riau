@@ -106,11 +106,23 @@ records = []
 for area in raw.get("data", []):
     lokasi = area.get("lokasi", {})
     for fc in area.get("cuaca", []):
-        row = {}
-        row.update(lokasi)
-        row.update(fc)
-        row["time"] = pd.to_datetime(fc.get("local_datetime"), errors="coerce")
-        records.append(row)
+        # fc kadang LIST (bukan dict) → harus diamankan
+        if isinstance(fc, list):
+            for item in fc:
+                if not isinstance(item, dict):
+                    continue
+                row = {}
+                row.update(lokasi)
+                row.update(item)
+                row["time"] = pd.to_datetime(item.get("local_datetime"), errors="coerce")
+                records.append(row)
+        elif isinstance(fc, dict):
+            row = {}
+            row.update(lokasi)
+            row.update(fc)
+            row["time"] = pd.to_datetime(fc.get("local_datetime"), errors="coerce")
+            records.append(row)
+        # tipe lain diabaikan
 
 df = pd.DataFrame(records)
 
