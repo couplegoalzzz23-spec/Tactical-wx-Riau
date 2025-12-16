@@ -70,8 +70,19 @@ st.caption("BMKG Official Public Forecast API")
 
 raw = fetch_bmkg(adm4)
 
-if raw is None or "data" not in raw:
-    st.error("❌ Gagal mengambil data dari BMKG Public API")
+# ================================
+# VALIDATION & FRIENDLY ERROR
+# ================================
+if raw is None:
+    st.error("❌ Tidak bisa terhubung ke server BMKG Public API")
+    st.stop()
+
+if "data" not in raw or not raw.get("data"):
+    st.warning("⚠️ Kode ADM4 tidak ditemukan / tidak tersedia di BMKG")
+    st.info("Gunakan ADM4 wilayah representatif, contoh:
+- 31.71.01.1001 (Jakarta Pusat)
+- 32.73.01.1001 (Bandung)
+- 33.74.01.1001 (Semarang)")
     st.stop()
 
 # =====================================
