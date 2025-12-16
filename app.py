@@ -1,6 +1,7 @@
 # =====================================
-# Tactical Weather Ops — BMKG (SAFE MODE)
-# Full Script • Copy–Paste • Anti Connection Error
+# Tactical Weather Operations Dashboard
+# BMKG OFFICIAL PUBLIC API VERSION (STABLE)
+# Full Script • Copy–Paste • No Connection Error
 # =====================================
 
 import streamlit as st
@@ -8,121 +9,99 @@ import requests
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # =====================================
 # ⚙️ PAGE CONFIG
 # =====================================
-st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
+st.set_page_config(page_title="Tactical Weather Ops — BMKG (Public API)", layout="wide")
 
 # =====================================
-# 📡 API CONFIG
+# 📡 BMKG OFFICIAL PUBLIC API
 # =====================================
-API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
-MS_TO_KT = 1.94384
+BMKG_API = "https://api.bmkg.go.id/publik/prakiraan-cuaca"
 METER_TO_SM = 0.000621371
 
 # =====================================
-# 🛡️ SAFE FETCH (ANTI ERROR)
+# 🛡️ SAFE FETCH (PUBLIC API)
 # =====================================
-@st.cache_data(ttl=300)
-def fetch_forecast(adm1: str):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (TacticalWx/1.0)",
-        "Accept": "application/json"
-    }
+@st.cache_data(ttl=600)
+def fetch_bmkg(adm4: str):
     try:
-        r = requests.get(API_BASE, params={"adm1": adm1}, headers=headers, timeout=10)
+        r = requests.get(
+            BMKG_API,
+            params={"adm4": adm4},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15
+        )
         r.raise_for_status()
         return r.json()
-    except requests.exceptions.RequestException as e:
-        print(f"[BMKG API WARNING] {e}")
-        return {}
+    except Exception as e:
+        print("BMKG FETCH ERROR:", e)
+        return None
 
 # =====================================
 # 🧰 UTILITIES
 # =====================================
-def safe_float(v, d=0.0):
+def safe_float(v):
     try:
         return float(v)
-    except Exception:
-        return d
-
-def safe_int(v, d=0):
-    try:
-        return int(float(v))
-    except Exception:
-        return d
-
-def convert_vis_to_sm(m):
-    if m is None or pd.isna(m):
-        return "—"
-    sm = m * METER_TO_SM
-    return f"{sm:.1f} SM" if sm < 5 else f"{int(round(sm))} SM"
+    except:
+        return np.nan
 
 # =====================================
 # 🧭 SIDEBAR
 # =====================================
 with st.sidebar:
     st.title("🛰 Tactical Controls")
-    adm1 = st.text_input("Province Code (ADM1)", value="32")
-    icao = st.text_input("ICAO", value="WXXX")
-    if st.button("🔄 Fetch Data"):
-        st.session_state["go"] = True
+    adm4 = st.text_input(
+        "ADM4 Code (BMKG)",
+        value="31.71.03.1001",
+        help="Kode wilayah BMKG (Prov.Kab.Kec.Desa)"
+    )
     st.markdown("---")
-    show_map = st.checkbox("Show Map", True)
-    show_table = st.checkbox("Show Table", False)
+    st.caption("Contoh ADM4: Jakarta Pusat = 31.71.03.1001")
 
 # =====================================
-# 📡 LOAD DATA (SAFE)
+# 📡 LOAD DATA
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
-st.caption("BMKG Forecast API — Safe Mode")
+st.caption("BMKG Official Public Forecast API")
 
-raw = fetch_forecast(adm1)
-entries = raw.get("data", [])
+raw = fetch_bmkg(adm4)
 
-if not entries:
-    st.warning("⚠️ BMKG API unavailable or blocked")
-    st.info("Dashboard running in SAFE MODE — no live data")
+if raw is None or "data" not in raw:
+    st.error("❌ Gagal mengambil data dari BMKG Public API")
     st.stop()
 
 # =====================================
-# 📍 LOCATION SELECT
+# 🔄 PARSE DATA
 # =====================================
-mapping = {}
-for e in entries:
-    loc = e.get("lokasi", {})
-    label = loc.get("kotkab") or loc.get("adm2") or "Unknown"
-    mapping[label] = e
-
-loc_choice = st.selectbox("Select Location", list(mapping.keys()))
-entry = mapping[loc_choice]
+records = []
+for area in raw.get("data", []):
+    lokasi = area.get("lokasi", {})
+    for f in area.get("cuaca", []):
+        r = f.copy()
+        r.update(lokasi)
+        r["time"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
+        records.append(r)
 
 # =====================================
-# 🔄 FLATTEN DATA
+# DATAFRAME
 # =====================================
-rows = []
-for group in entry.get("cuaca", []):
-    for o in group:
-        r = o.copy()
-        r.update(entry.get("lokasi", {}))
-        r["local_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
-        rows.append(r)
+df = pd.DataFrame(records)
 
-df = pd.DataFrame(rows)
 if df.empty:
-    st.warning("No usable weather data")
+    st.warning("Data kosong dari BMKG")
     st.stop()
 
-for c in ["t","hu","ws","wd_deg","vs","tp"]:
+for c in ["t","hu","ws","wd","vs","tp"]:
     if c in df.columns:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-if "ws" in df.columns:
-    df["ws_kt"] = df["ws"] * MS_TO_KT
-
+# =====================================
+# CURRENT CONDITIONS
+# =====================================
 now = df.iloc[0]
 
 # =====================================
@@ -132,44 +111,38 @@ st.markdown("---")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Temp (°C)", safe_float(now.get("t")))
+    st.metric("Temperature (°C)", now.get("t"))
 with col2:
-    st.metric("Wind (KT)", f"{safe_float(now.get('ws_kt')):.1f}")
+    st.metric("Humidity (%)", now.get("hu"))
 with col3:
-    st.metric("Visibility", f"{safe_int(now.get('vs'))} m")
+    st.metric("Visibility (m)", now.get("vs"))
 with col4:
-    st.metric("Rain (mm)", safe_float(now.get("tp")))
+    st.metric("Rain (mm)", now.get("tp"))
 
 # =====================================
 # 📈 TRENDS
 # =====================================
 st.markdown("---")
-st.subheader("📊 Trends")
-if "local_dt" in df.columns:
-    st.plotly_chart(px.line(df, x="local_dt", y="t", title="Temperature"), use_container_width=True)
+st.subheader("📊 Temperature Trend")
 
-# =====================================
-# 🗺 MAP
-# =====================================
-if show_map:
-    lat = safe_float(entry.get("lokasi", {}).get("lat"))
-    lon = safe_float(entry.get("lokasi", {}).get("lon"))
-    if lat != 0 and lon != 0:
-        st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
+if "time" in df.columns:
+    fig = px.line(df, x="time", y="t", title="Temperature Forecast")
+    st.plotly_chart(fig, use_container_width=True)
 
 # =====================================
 # 📋 TABLE
 # =====================================
-if show_table:
-    st.dataframe(df)
+st.markdown("---")
+st.subheader("📋 Raw Forecast Data")
+st.dataframe(df)
 
 # =====================================
 # ⚓ FOOTER
 # =====================================
 st.markdown("""
 ---
-<div style='text-align:center; color:#7a7;'>
-Tactical Weather Ops — SAFE MODE<br>
-UI active even when BMKG API is unavailable
+<div style="text-align:center; color:#7a7;">
+Tactical Weather Ops Dashboard<br>
+Data Source: BMKG Official Public API
 </div>
 """, unsafe_allow_html=True)
