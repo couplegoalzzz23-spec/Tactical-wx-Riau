@@ -4,15 +4,15 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # =====================================
 # ⚙️ KONFIGURASI DASAR
 # =====================================
-st.set_page_config(page_title="Tactical Weather Ops — BMKG (Revised API)", layout="wide")
+st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =====================================
-# 🌑 CSS — MILITARY STYLE
+# 🌑 CSS — MILITARY STYLE + RADAR ANIMATION + FLIGHT PANEL + MET REPORT TABLE
 # =====================================
 
 # Menyimpan CSS styling untuk digunakan dalam file HTML QAM yang diunduh
@@ -245,7 +245,7 @@ hr, .stDivider {
 """, unsafe_allow_html=True)
 
 # =====================================
-# 🟢 HUD + DAY/NIGHT LOGIC
+# 🟢 HUD + DAY/NIGHT LOGIC (ADDITIONAL BLOCKS)
 # =====================================
 
 # Helper: safe numeric getters to avoid formatting errors
@@ -271,20 +271,19 @@ with st.sidebar:
     st.subheader("🌗 Display Mode")
     override_mode = st.selectbox("Override Mode", ["Auto", "Day", "Night"], index=0)
 
-def get_day_night_mode(mode_choice):
-    if mode_choice == "Day": return "day"
-    if mode_choice == "Night": return "night"
+def get_day_night_mode():
+    if override_mode == "Day": return "day"
+    if override_mode == "Night": return "night"
     # AUTO MODE (local)
     hour = datetime.now().hour
     return "day" if 6 <= hour < 18 else "night"
 
-CURRENT_MODE = get_day_night_mode(override_mode)
+CURRENT_MODE = get_day_night_mode()
 
 # =====================================
-# 📡 KONFIGURASI API (DIPERBARUI)
+# 📡 KONFIGURASI API
 # =====================================
-# Mengganti ke API Data Terbuka BMKG yang resmi
-API_BASE = "https://api.bmkg.go.id/publik/prakiraan-cuaca" 
+API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384 # konversi ke knot
 METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
 
@@ -292,66 +291,40 @@ METER_TO_SM = 0.000621371 # 1 meter = 0.000621371 statute miles (SM)
 # 🧰 UTILITAS
 # =====================================
 @st.cache_data(ttl=300)
-# Mengubah parameter ke adm4_code dan menggunakan adm4 di params
-def fetch_forecast(adm4_code: str):
-    params = {"adm4": adm4_code} 
+def fetch_forecast(adm1: str):
+    params = {"adm1": adm1}
     resp = requests.get(API_BASE, params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
-# Mengubah fungsi flatten agar sesuai dengan struktur API Data Terbuka
-def flatten_forecast_list(raw_data: dict):
-    # API baru memiliki list forecast di key 'data'
-    forecast_list = raw_data.get("data", [])
+def flatten_cuaca_entry(entry):
     rows = []
-    
-    for obs in forecast_list:
-        r = obs.copy()
-        
-        # Nama key datetime berbeda di API baru (menggunakan 'datetime')
-        dt_str = r.get("datetime")
-        if dt_str:
-            # Format: YYYYMMDDHHmmss. Asumsi UTC dari BMKG, dikonversi ke WIB (Asia/Jakarta)
-            r["utc_datetime_dt"] = pd.to_datetime(dt_str, format='%Y%m%d%H%M%S', errors="coerce", utc=True)
-            r["local_datetime_dt"] = r["utc_datetime_dt"].dt.tz_convert('Asia/Jakarta')
-            r["utc_datetime"] = r["utc_datetime_dt"].dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-            r["local_datetime"] = r["local_datetime_dt"].dt.strftime('%Y-%m-%d %H:%M:%S WIB')
-        else:
-            r["utc_datetime_dt"] = pd.NaT
-            r["local_datetime_dt"] = pd.NaT
-            r["utc_datetime"] = "—"
-            r["local_datetime"] = "—"
-            
-        # Tambahkan placeholder untuk kolom lokasi yang hilang
-        r["adm1"] = "N/A"
-        r["adm2"] = "N/A"
-        r["provinsi"] = "Unknown Province"
-        r["kotkab"] = "Specific Location"
-        r["lon"] = 0.0
-        r["lat"] = 0.0
-            
-        rows.append(r)
-
+    lokasi = entry.get("lokasi", {})
+    for group in entry.get("cuaca", []):
+        for obs in group:
+            r = obs.copy()
+            r.update({
+                "adm1": lokasi.get("adm1"),
+                "adm2": lokasi.get("adm2"),
+                "provinsi": lokasi.get("provinsi"),
+                "kotkab": lokasi.get("kotkab"),
+                "lon": lokasi.get("lon"),
+                "lat": lokasi.get("lat"),
+            })
+            # safe datetime parse
+            r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
+            r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
+            rows.append(r)
     df = pd.DataFrame(rows)
-    # Konversi kolom numerik dengan aman
-    for c in ["t","tcc","tp","wd_deg","ws","hu","vs"]:
+    for c in ["t","tcc","tp","wd_deg","ws","hu","vs","ws_kt"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
-    
-    # Hitung ws_kt jika 'ws' ada
-    if "ws" in df.columns:
-        df["ws_kt"] = df["ws"] * MS_TO_KT
-    elif "ws_kt" in df.columns:
-        df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
-    else:
-        df["ws_kt"] = np.nan
-
     return df
 
 def estimate_dewpoint(temp, rh):
     if pd.isna(temp) or pd.isna(rh):
         return None
-    # simple approximation (Magnus formula simplification)
+    # simple approximation
     return temp - ((100 - rh) / 5)
 
 def ceiling_proxy_from_tcc(tcc_pct):
@@ -378,7 +351,6 @@ def convert_vis_to_sm(visibility_m):
         if vis_sm < 1:
             return f"{vis_sm:.1f} SM"
         elif vis_sm < 5:
-            # Logic untuk menampilkan .0 atau .5 (contoh 3.0 atau 3.5)
             if (vis_sm * 2) % 2 == 0:
                 return f"{int(vis_sm)} SM"
             else:
@@ -389,53 +361,39 @@ def convert_vis_to_sm(visibility_m):
         return "—"
 
 def classify_ifr_vfr(visibility_m, ceiling_ft):
-    # Defaulting to 10000m if visibility is missing, for VFR bias (common METAR practice)
-    vis_m = safe_float(visibility_m, default=10000)
-    vis_sm = vis_m / 1609.34
-    
-    # Defaulting to a high value if ceiling is missing
-    ceil_ft = safe_int(ceiling_ft, default=99999) 
-
-    if vis_sm >= 5 and ceil_ft > 3000: return "VFR"
-    if (3 <= vis_sm < 5) or (1000 < ceil_ft <= 3000): return "MVFR"
-    if vis_sm < 3 or ceil_ft <= 1000: return "IFR"
-    return "Unknown" # Should be rare if defaults applied
+    if visibility_m is None or pd.isna(visibility_m):
+        return "Unknown"
+    vis_sm = float(visibility_m) / 1609.34
+    if ceiling_ft is None:
+        if vis_sm >= 3: return "VFR"
+        elif vis_sm >= 1: return "MVFR"
+        else: return "IFR"
+    if vis_sm >= 5 and ceiling_ft > 3000: return "VFR"
+    if (3 <= vis_sm < 5) or (1000 < ceiling_ft <= 3000): return "MVFR"
+    if vis_sm < 3 or ceiling_ft <= 1000: return "IFR"
+    return "Unknown"
 
 def takeoff_landing_recommendation(ws_kt, vs_m, tp_mm):
     rationale = []
     takeoff = "Recommended"
     landing = "Recommended"
-    
-    ws_kt_val = safe_float(ws_kt)
-    vs_m_val = safe_float(vs_m, default=9999) # Default high visibility
-    tp_mm_val = safe_float(tp_mm)
-
-    if ws_kt_val >= 30:
+    if pd.notna(ws_kt) and float(ws_kt) >= 30:
         takeoff = "Not Recommended"
         landing = "Not Recommended"
-        rationale.append(f"High surface wind: {ws_kt_val:.1f} KT (>=30 KT limit)")
-    elif ws_kt_val >= 20:
-        rationale.append(f"Strong wind advisory: {ws_kt_val:.1f} KT (>=20 KT advisory)")
-        if takeoff == "Recommended": takeoff = "Caution"
-        if landing == "Recommended": landing = "Caution"
-        
-    if vs_m_val < 1000:
+        rationale.append(f"High surface wind: {ws_kt:.1f} KT (>=30 KT limit)")
+    elif pd.notna(ws_kt) and float(ws_kt) >= 20:
+        rationale.append(f"Strong wind: {ws_kt:.1f} KT (>=20 KT advisory)")
+    if pd.notna(vs_m) and float(vs_m) < 1000:
         landing = "Not Recommended"
-        rationale.append(f"Low visibility: {vs_m_val} m (<1000 m limit)")
-    elif vs_m_val < 3000:
-        if landing == "Recommended": landing = "Caution"
-        rationale.append(f"Reduced visibility: {vs_m_val} m (<3000 m advisory)")
-
-    if tp_mm_val >= 20:
-        if takeoff == "Recommended": takeoff = "Caution"
-        if landing == "Recommended": landing = "Caution"
-        rationale.append(f"Heavy accumulated rain: {tp_mm_val} mm (runway contamination possible)")
-    elif tp_mm_val > 5:
-        rationale.append(f"Moderate rainfall: {tp_mm_val} mm (slick runway possible)")
-
+        rationale.append(f"Low visibility: {vs_m} m (<1000 m)")
+    if pd.notna(tp_mm) and float(tp_mm) >= 20:
+        takeoff = "Caution"
+        landing = "Caution"
+        rationale.append(f"Heavy accumulated rain: {tp_mm} mm (runway contamination possible)")
+    elif pd.notna(tp_mm) and float(tp_mm) > 5:
+        rationale.append(f"Moderate rainfall: {tp_mm} mm")
     if not rationale:
         rationale.append("Conditions within conservative operational limits.")
-        
     return takeoff, landing, rationale
 
 # Visual badge helper
@@ -449,147 +407,114 @@ def badge_html(status):
     return "<span class='badge-yellow'>UNKNOWN</span>"
 
 # =====================================
-# 🎚️ SIDEBAR (SEBELUM DATA DIMUAT) - DIPERBARUI
+# 🎚️ SIDEBAR (SEBELUM DATA DIMUAT)
 # =====================================
-# Definisi awal untuk menghindari UnboundLocalError
-df = pd.DataFrame()
-df_sel = pd.DataFrame()
-now = pd.Series({}) 
-icao_code = "WXXX" # Default value
-loc_choice = "Specific Location" # Default value
-
 with st.sidebar:
     st.title("🛰️ Tactical Controls")
-    # MENGGANTI DARI ADM1 KE ADM4 CODE
-    # Contoh Kode ADM4: 31.71.03.1001 (Kel. Kemayoran, Jakarta)
-    adm4_code = st.text_input("Village/Kelurahan Code (ADM4)", value="31.71.03.1001")
+    adm1 = st.text_input("Province Code (ADM1)", value="32")
+    # Tambahkan input ICAO Code
     icao_code = st.text_input("ICAO Code (WXXX)", value="WXXX", max_chars=4)
     st.markdown("<div class='radar'></div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#5f5;'>Scanning Weather...</p>", unsafe_allow_html=True)
-    # Tombol ini hanya memicu rerun, bukan memuat data secara eksplisit di sini
-    if st.button("🔄 Fetch Data"):
-        st.session_state["rerun_trigger"] = True
-    else:
-        st.session_state["rerun_trigger"] = False
-        
+    st.button("🔄 Fetch Data")
     st.markdown("---")
     # Kontrol Tampilan
+    # show_metar (FCST Style Report) telah dihapus
     show_map = st.checkbox("Show Map", value=True)
     show_table = st.checkbox("Show Table (Raw Data)", value=False)
+    # Kontrol baru untuk MET Report
     show_qam_report = st.checkbox("Show MET Report (QAM)", value=True) # Set to True as preferred
     st.markdown("---")
-    st.caption("Data Source: BMKG Open Data API · Military Ops v2.2")
+    st.caption("Data Source: BMKG API · Military Ops v2.2")
 
 # =====================================
-# 📡 LOAD DATA (DIPERBARUI)
+# 📡 LOAD DATA
 # =====================================
 st.title("Tactical Weather Operations Dashboard")
-st.markdown("*Source: BMKG Open Data API — Live Data*")
+st.markdown("*Source: BMKG Forecast API — Live Data*")
 
 # BLOK TRY DIMULAI DI SINI
 try:
-    with st.spinner(f"🛰️ Acquiring weather intelligence for ADM4: {adm4_code}..."):
-        # Panggil dengan kode ADM4
-        raw = fetch_forecast(adm4_code)
+    with st.spinner("🛰️ Acquiring weather intelligence..."):
+        raw = fetch_forecast(adm1)
         
-    # API Data Terbuka langsung mengembalikan list forecast di key 'data'
     entries = raw.get("data", [])
-    
     if not entries:
-        st.error(f"Error: API returned no data for ADM4 code: {adm4_code}. Check if the code is correct.")
-        # Menghentikan eksekusi
+        st.warning("No forecast data available.")
         st.stop()
 
-    # Hapus logic pemilihan lokasi (mapping, selectbox) karena data sudah spesifik
-    loc_choice = f"ADM4 Code: {adm4_code}" 
+    mapping = {}
+    for e in entries:
+        lok = e.get("lokasi", {})
+        label = lok.get("kotkab") or lok.get("adm2") or f"Location {len(mapping)+1}"
+        mapping[label] = {"entry": e}
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.markdown(f"**🎯 Location Code:** `{adm4_code}`")
+        loc_choice = st.selectbox("🎯 Select Location", options=list(mapping.keys()))
     with col2:
-        st.metric("📍 Forecast Points", len(entries))
+        st.metric("📍 Locations", len(mapping))
 
-    # Gunakan fungsi flatten yang baru
-    df = flatten_forecast_list(raw)
+    selected_entry = mapping[loc_choice]["entry"]
+    df = flatten_cuaca_entry(selected_entry)
 
     if df.empty:
-        st.warning("No valid weather data found for selected location.")
+        st.warning("No valid weather data found.")
         st.stop()
-    
+
+    # compute ws_kt if not already present
+    if "ws_kt" not in df.columns:
+        df["ws_kt"] = df["ws"] * MS_TO_KT
+    else:
+        df["ws_kt"] = pd.to_numeric(df["ws_kt"], errors="coerce")
+
 # =====================================
 # 🕓 SLIDER WAKTU
 # =====================================
-    use_col = None
-    min_dt = datetime.now()
-    max_dt = min_dt + timedelta(hours=3)
-
     # Find the correct datetime column and set range
     if "local_datetime_dt" in df.columns and df["local_datetime_dt"].notna().any():
-        df = df.sort_values("local_datetime_dt").reset_index(drop=True)
-        # Menghilangkan NaT dan mengonversi ke datetime Python untuk slider
-        valid_dt = df["local_datetime_dt"].dropna().dt.to_pydatetime()
-        if len(valid_dt) > 0:
-            min_dt = valid_dt.min()
-            max_dt = valid_dt.max()
-            use_col = "local_datetime_dt"
+        df = df.sort_values("local_datetime_dt")
+        min_dt = df["local_datetime_dt"].dropna().min().to_pydatetime()
+        max_dt = df["local_datetime_dt"].dropna().max().to_pydatetime()
+        use_col = "local_datetime_dt"
     elif "utc_datetime_dt" in df.columns and df["utc_datetime_dt"].notna().any():
-        df = df.sort_values("utc_datetime_dt").reset_index(drop=True)
-        valid_dt = df["utc_datetime_dt"].dropna().dt.to_pydatetime()
-        if len(valid_dt) > 0:
-            min_dt = valid_dt.min()
-            max_dt = valid_dt.max()
-            use_col = "utc_datetime_dt"
+        df = df.sort_values("utc_datetime_dt")
+        min_dt = df["utc_datetime_dt"].dropna().min().to_pydatetime()
+        max_dt = df["utc_datetime_dt"].dropna().max().to_pydatetime()
+        use_col = "utc_datetime_dt"
+    else:
+        min_dt = 0
+        max_dt = len(df)-1
+        use_col = None
 
-    # slider only when datetime exists and there is data
-    if use_col and len(df) > 0:
-        # Menentukan nilai default slider
-        default_start = min_dt
-        # Coba ambil data terdekat dengan sekarang sebagai default_start
-        if use_col == "local_datetime_dt":
-            current_time = datetime.now()
-            # Temukan index waktu terdekat
-            closest_idx = (df[use_col].dropna() - current_time).abs().argsort().iloc[0]
-            default_start = df.loc[closest_idx, use_col].to_pydatetime()
-            
-        default_end = default_start + pd.Timedelta(hours=3)
-        if default_end > max_dt:
-             default_end = max_dt
-        if default_start > max_dt:
-             default_start = max_dt
-             
+    # slider only when datetime exists
+    if use_col:
         # Memindahkan slider ke Sidebar
         with st.sidebar:
             start_dt = st.slider(
                 "Time Range",
                 min_value=min_dt,
                 max_value=max_dt,
-                value=(default_start, default_end),
+                # Set default range to cover only the first forecast time
+                value=(min_dt, min_dt + pd.Timedelta(hours=3)) if len(df) > 1 else (min_dt, max_dt),
                 step=pd.Timedelta(hours=3),
                 format="HH:mm, MMM DD"
             )
         mask = (df[use_col] >= pd.to_datetime(start_dt[0])) & (df[use_col] <= pd.to_datetime(start_dt[1]))
-        df_sel = df.loc[mask].copy() # Menggunakan .copy()
+        df_sel = df.loc[mask].copy()
     else:
         df_sel = df.copy()
-        
+
     if df_sel.empty:
-        st.warning("No data in selected time range. Showing the first available forecast point.")
-        df_sel = df.head(1).copy()
-        if df_sel.empty:
-            st.stop()
-            
-    # Pastikan 'now' adalah baris pertama dari data yang dipilih atau default Series
-    now = df_sel.iloc[0].to_dict() if not df_sel.empty else pd.Series({})
-    # Konversi kembali ke Series untuk konsistensi dengan kode asli
-    now = pd.Series(now)
+        st.warning("No data in selected time range.")
+        st.stop()
+        
+    now = df_sel.iloc[0]
 
     # prepare MET REPORT values (diperlukan untuk bagian di bawah dan QAM)
     dewpt = estimate_dewpoint(now.get("t"), now.get("hu"))
     dewpt_disp = f"{dewpt:.1f}°C" if dewpt is not None else "—"
-    
-    # Perbaikan: Pastikan tcc adalah float yang valid sebelum dipanggil
-    tcc_val = safe_float(now.get("tcc"), default=np.nan)
-    ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(tcc_val)
+    ceiling_est_ft, ceiling_label = ceiling_proxy_from_tcc(now.get("tcc"))
     ceiling_display = f"{ceiling_est_ft} ft" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
     
     # NEW: Konversi Visibilitas ke Statute Miles
@@ -603,32 +528,23 @@ try:
     st.markdown('<div class="flight-card">', unsafe_allow_html=True)
     st.markdown('<div class="flight-title">✈ Key Meteorological Status</div>', unsafe_allow_html=True)
     
-    # Ambil nilai dengan aman
-    temp_val = now.get('t','—')
-    ws_kt_val = safe_float(now.get('ws_kt'), default=0.0)
-    wd_deg_val = now.get('wd_deg','—')
-    vs_val = now.get('vs','—')
-    vs_text_val = now.get('vs_text','—')
-    weather_desc_val = now.get('weather_desc','—')
-    tp_val = safe_float(now.get('tp'), default=0.0)
-    
     colA, colB, colC, colD = st.columns(4)
     with colA:
         st.markdown("<div class='metric-label'>Temperature (°C)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{temp_val}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('t','—')}</div>", unsafe_allow_html=True)
         st.markdown("<div class='small-note'>Ambient</div>", unsafe_allow_html=True)
     with colB:
         st.markdown("<div class='metric-label'>Wind Speed (KT)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{ws_kt_val:.1f}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>{wd_deg_val}°</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>{now.get('wd_deg','—')}°</div>", unsafe_allow_html=True)
     with colC:
         st.markdown("<div class='metric-label'>Visibility (M/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
-        st.markdown(f"<div class='metric-value'>{vs_val}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {vs_text_val}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
+        st.markdown(f"<div class='metric-value'>{now.get('vs','—')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
     with colD:
         st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-value'>{weather_desc_val}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='small-note'>Rain: {tp_val:.1f} mm (Accum.)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-value'>{now.get('weather_desc','—')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small-note'>Rain: {now.get('tp',0):.1f} mm (Accum.)</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -644,8 +560,8 @@ try:
     # dynamic HUD variables (safe)
     _wdir = safe_int(now.get("wd_deg"), default=0)
     _wspd = safe_float(now.get("ws_kt"), default=0.0)
-    _vis = safe_int(now.get("vs"), default=9999) # Defaulting visibility to high
-    _ceil = safe_int(ceiling_est_ft, default=99999)
+    _vis = safe_int(now.get("vs"), default=0)
+    _ceil = safe_int(ceiling_est_ft, default=0)
 
     # limit wind arrow length so it fits nicely
     max_arrow_len = 120
@@ -657,15 +573,22 @@ try:
 
     hud_svg = f"""
     <svg id="f16hud-svg" viewBox="0 0 800 300" preserveAspectRatio="xMidYMid meet">
+      <!-- Horizon -->
       <line x1="50" y1="150" x2="750" y2="150" class="hud-glow" stroke="#0f0" stroke-width="1.5"/>
+      <!-- Pitch Ladder short marks -->
       <line x1="140" y1="120" x2="200" y2="120" class="hud-glow" stroke="#0f0" stroke-width="1"/>
       <line x1="140" y1="180" x2="200" y2="180" class="hud-glow" stroke="#0f0" stroke-width="1"/>
+      <!-- Heading -->
       <text x="400" y="42" fill="#0f0" font-size="22" text-anchor="middle">HDG {_wdir:03d}°</text>
+      <!-- Wind arrow from center -->
       <line id="hud-wind-arrow" x1="400" y1="150" x2="{400 + dx:.1f}" y2="{150 + dy:.1f}" stroke="#0f0" />
       <polygon points="{400 + dx:.1f},{150 + dy:.1f} {400 + dx - 6:.1f},{150 + dy - 6:.1f} {400 + dx + 6:.1f},{150 + dy - 6:.1f}" fill="#0f0"/>
+      <!-- Wind readout -->
       <text x="400" y="190" fill="#0f0" font-size="18" text-anchor="middle">WIND {_wdir}° / {_wspd:.1f} KT</text>
+      <!-- Visibility and Ceiling -->
       <text x="120" y="260" fill="#0f0" font-size="16">VIS: {_vis} m ({convert_vis_to_sm(_vis)})</text>
       <text x="680" y="260" fill="#0f0" font-size="16" text-anchor="end">CEIL: {_ceil} ft</text>
+      <!-- Tactical quick statuses -->
       <rect x="18" y="18" width="110" height="28" fill="rgba(0,0,0,0.3)" stroke="#0f0" rx="6"/>
       <text x="74" y="36" fill="#0f0" font-size="12" text-anchor="middle">TACTICAL</text>
     </svg>
@@ -683,48 +606,35 @@ try:
 
     detail_col1, detail_col2 = st.columns(2)
 
-    # Ambil nilai tambahan dengan aman. Nilai lokasi menggunakan placeholder.
-    hu_val = now.get('hu','—')
-    wd_val = now.get('wd','—')
-    provinsi_val = now.get('provinsi','—') # Placeholder
-    kotkab_val = now.get('kotkab','—') # Placeholder
-    local_dt_val = now.get('local_datetime','—')
-    utc_dt_val = now.get('utc_datetime','—')
-    # analysis_date tidak ada di API baru, ganti dengan datetime
-    analysis_date_val = now.get('utc_datetime','—') 
-    weather_val = now.get('weather','—')
-    lat_val = now.get('lat','—') # Placeholder
-    lon_val = now.get('lon','—') # Placeholder
-    
     with detail_col1:
         st.markdown("##### 🌡️ Atmospheric State")
         # Row 1: Temperature & Dew Point
         col_t, col_dp = st.columns(2)
         with col_t:
             st.markdown("<div class='metric-label'>Air Temperature (°C)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{temp_val}°C</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{now.get('t','—')}°C</div>", unsafe_allow_html=True)
         with col_dp:
             st.markdown("<div class='metric-label'>Dew Point (Est)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div classs='detail-value'>{dewpt_disp}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{dewpt_disp}</div>", unsafe_allow_html=True)
 
         # Row 2: Humidity & Wind Dir Code
         col_hu, col_wd = st.columns(2)
         with col_hu:
             st.markdown("<div class='metric-label'>Relative Humidity (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{hu_val}%</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{now.get('hu','—')}%</div>", unsafe_allow_html=True)
         with col_wd:
             st.markdown("<div class='metric-label'>Wind Direction (Code)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{wd_val} ({wd_deg_val}°)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{now.get('wd','—')} ({now.get('wd_deg','—')}°)</div>", unsafe_allow_html=True)
         
         # Row 3: Location Details (Moved here)
         st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
         col_prov, col_city = st.columns(2)
         with col_prov:
             st.markdown("<div classs='metric-label'>Province</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{provinsi_val}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('provinsi','—')}</div>", unsafe_allow_html=True)
         with col_city:
-            st.markdown("<div class='metric-label'>City/Regency (ADM4 Location)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{kotkab_val}</div>", unsafe_allow_html=True)
+            st.markdown("<div class='metric-label'>City/Regency</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('kotkab','—')}</div>", unsafe_allow_html=True)
 
 
     with detail_col2:
@@ -733,8 +643,8 @@ try:
         col_vis, col_ceil = st.columns(2)
         with col_vis:
             st.markdown("<div class='metric-label'>Visibility (Metres/SM)</div>", unsafe_allow_html=True) # LABEL DIUBAH
-            st.markdown(f"<div class='detail-value'>{vs_val} m</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {vs_text_val}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
+            st.markdown(f"<div class='detail-value'>{now.get('vs','—')} m</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='small-note'>({vis_sm_disp}) / {now.get('vs_text','—')}</div>", unsafe_allow_html=True) # NILAI SM DITAMBAH
         with col_ceil:
             st.markdown("<div class='metric-label'>Est. Ceiling Base</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='detail-value'>{ceiling_display}</div>", unsafe_allow_html=True)
@@ -743,22 +653,21 @@ try:
         # Row 2: Cloud Cover & Weather Desc
         col_tcc, col_wx = st.columns(2)
         with col_tcc:
-            tcc_display = f"{tcc_val:.0f}%" if not pd.isna(tcc_val) else "—"
             st.markdown("<div class='metric-label'>Cloud Cover (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{tcc_display}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{now.get('tcc','—')}%</div>", unsafe_allow_html=True)
         with col_wx:
             st.markdown("<div class='metric-label'>Present Weather</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value'>{weather_desc_val} ({weather_val})</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value'>{now.get('weather_desc','—')} ({now.get('weather','—')})</div>", unsafe_allow_html=True)
         
         # Row 3: Time Index/Local Time
         st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
         col_local, col_anal = st.columns(2)
         with col_local:
-            st.markdown("<div classs='metric-label'>Local Forecast Time</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{local_dt_val}</div>", unsafe_allow_html=True)
+            st.markdown("<div class='metric-label'>Local Forecast Time</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('local_datetime','—')}</div>", unsafe_allow_html=True)
         with col_anal:
-            st.markdown("<div class='metric-label'>Forecast Data Time (UTC)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{analysis_date_val}</div>", unsafe_allow_html=True)
+            st.markdown("<div class='metric-label'>Analysis Time (UTC)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='detail-value' style='font-size: 1.0rem;'>{now.get('analysis_date','—')}</div>", unsafe_allow_html=True)
 
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -769,7 +678,8 @@ try:
 
     if show_qam_report:
         # prepare MET REPORT values
-        wind_info = f"{wd_deg_val}° / {ws_kt_val:.1f} KT"
+        visibility_m = now.get('vs')
+        wind_info = f"{now.get('wd_deg','—')}° / {now.get('ws_kt',0):.1f} KT"
         wind_variation = "Not available (BMKG Forecast)"  
         ceiling_full_desc = f"Est. Base: {ceiling_est_ft} ft ({ceiling_label.split('(')[0].strip()})" if ceiling_est_ft is not None and ceiling_est_ft <= 99999 else "—"
 
@@ -783,11 +693,11 @@ try:
             <table class="met-report-table">
                 <tr>
                     <th>METEOROLOGICAL OBS AT / DATE / TIME</th>
-                    <td>{local_dt_val} (WIB) / {utc_dt_val} (UTC)</td>
+                    <td>{now.get('local_datetime','—')} (Local) / {now.get('utc_datetime','—')} (UTC)</td>
                 </tr>
                 <tr>
                     <th>AERODROME IDENTIFICATION</th>
-                    <td>{icao_code} / ADM4: {adm4_code}</td>
+                    <td>{icao_code} / {now.get('kotkab','—')} ({now.get('adm2','—')})</td>
                 </tr>
                 <tr>
                     <th>SURFACE WIND DIRECTION, SPEED AND SIGNIFICANT VARIATION</th>
@@ -795,22 +705,22 @@ try:
                 </tr>
                 <tr>
                     <th>HORIZONTAL VISIBILITY</th>
-                    <td>{vs_val} m ({vis_sm_disp}) / {vs_text_val}</td> </tr>
+                    <td>{visibility_m} m ({vis_sm_disp}) / {now.get('vs_text','—')}</td> </tr>
                 <tr>
                     <th>RUNWAY VISUAL RANGE</th>
                     <td>— (RVR not available)</td>
                 </tr>
                 <tr>
                     <th>PRESENT WEATHER</th>
-                    <td>{weather_desc_val} (Accum. Rain: {tp_val:.1f} mm)</td>
+                    <td>{now.get('weather_desc','—')} (Accum. Rain: {now.get('tp',0):.1f} mm)</td>
                 </tr>
                 <tr>
                     <th>AMOUNT AND HEIGHT OF BASE OF LOW CLOUD</th>
-                    <td>Cloud Cover: {tcc_display} / {ceiling_full_desc}</td>
+                    <td>Cloud Cover: {now.get('tcc','—')}% / {ceiling_full_desc}</td>
                 </tr>
                 <tr>
                     <th>AIR TEMPERATURE AND DEW POINT TEMPERATURE</th>
-                    <td>Air Temp: {temp_val}°C / Dew Point: {dewpt_disp} / RH: {hu_val}%</td>
+                    <td>Air Temp: {now.get('t','—')}°C / Dew Point: {dewpt_disp} / RH: {now.get('hu','—')}%</td>
                 </tr>
                 <tr>
                     <th>QNH</th>
@@ -831,11 +741,11 @@ try:
                 </tr>
                 <tr>
                     <th>SUPPLEMENTARY INFORMATION</th>
-                    <td>{provinsi_val} / Code: {adm4_code} / Lat: {lat_val}, Lon: {lon_val}</td>
+                    <td>{now.get('provinsi','—')} / Latitude: {now.get('lat','—')}, Longitude: {now.get('lon','—')}</td>
                 </tr>
                 <tr>
                     <th>TIME OF ISSUE (UTC) / OBSERVER</th>
-                    <td>{utc_dt_val} / FCST ON DUTY</td>
+                    <td>{now.get('utc_datetime','—')} / FCST ON DUTY</td>
                 </tr>
             </table>
         </div>
@@ -843,7 +753,6 @@ try:
         # 📌 END: MEMBANGUN HTML UNTUK LAPORAN QAM
 
         # Menggabungkan CSS dan konten HTML untuk file yang diunduh
-        qam_datetime_safe = local_dt_val.replace(' ', '_').replace(':','').replace('-','')
         full_qam_html = f"<html><head>{CSS_STYLES}</head><body>{met_report_html_content}</body></html>"
 
         st.markdown("---")
@@ -851,7 +760,7 @@ try:
         st.markdown(met_report_html_content, unsafe_allow_html=True)
         
         # Implementasi tombol Download QAM
-        qam_filename = f"MET_REPORT_{adm4_code}_{qam_datetime_safe}.html"
+        qam_filename = f"MET_REPORT_{loc_choice}_{now.get('local_datetime','—').replace(' ', '_').replace(':','')}.html"
         st.download_button(
             label="⬇ Download QAM Report (HTML)",
             data=full_qam_html,
@@ -893,21 +802,12 @@ try:
 # =====================================
     st.subheader("📊 Parameter Trends")
     c1, c2 = st.columns(2)
-    # Check if required columns exist and df_sel is not empty before plotting
-    if not df_sel.empty and "local_datetime_dt" in df_sel.columns:
-        with c1:
-            if "t" in df_sel.columns:
-                st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
-            if "hu" in df_sel.columns:
-                st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
-        with c2:
-            if "ws_kt" in df_sel.columns:
-                st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind (KT)"), use_container_width=True)
-            if "tp" in df_sel.columns:
-                st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
-    else:
-        st.info("Insufficient data for plotting trends in the selected time range.")
-
+    with c1:
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="t", title="Temperature"), use_container_width=True)
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="hu", title="Humidity"), use_container_width=True)
+    with c2:
+        st.plotly_chart(px.line(df_sel, x="local_datetime_dt", y="ws_kt", title="Wind (KT)"), use_container_width=True)
+        st.plotly_chart(px.bar(df_sel, x="local_datetime_dt", y="tp", title="Rainfall"), use_container_width=True)
 
 # =====================================
 # 🌪️ WINDROSE (ASLI)
@@ -915,27 +815,20 @@ try:
     st.markdown("---")
     st.subheader("🌪️ Windrose — Direction & Speed")
     if "wd_deg" in df_sel.columns and "ws_kt" in df_sel.columns:
-        df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"]).copy() # Menggunakan .copy()
+        df_wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
         if not df_wr.empty:
             bins_dir = np.arange(-11.25,360,22.5)
             labels_dir = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
                           "S","SSW","SW","WSW","W","WNW","NW","NNW"]
             
-            # Penggunaan .loc[] untuk menghindari SettingWithCopyWarning
-            df_wr.loc[:,"dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)  
+            df_wr["dir_sector"] = pd.cut(df_wr["wd_deg"] % 360, bins=bins_dir, labels=labels_dir, include_lowest=True)  
             
             speed_bins = [0,5,10,20,30,50,100]
             speed_labels = ["<5","5–10","10–20","20–30","30–50",">50"]
             
-            df_wr.loc[:,"speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
+            df_wr["speed_class"] = pd.cut(df_wr["ws_kt"], bins=speed_bins, labels=speed_labels, include_lowest=True)
             
-            # Pastikan kategori arah angin lengkap untuk polar plot
-            all_sectors = pd.Categorical(labels_dir, categories=labels_dir, ordered=True)
-            freq = df_wr.groupby(["dir_sector","speed_class"], observed=True).size().reset_index(name="count")
-            
-            # Isi data yang hilang dengan 0
-            multi_index = pd.MultiIndex.from_product([all_sectors.categories, speed_labels], names=["dir_sector", "speed_class"])
-            freq = freq.set_index(["dir_sector", "speed_class"]).reindex(multi_index).fillna(0).reset_index()
+            freq = df_wr.groupby(["dir_sector","speed_class"]).size().reset_index(name="count")
             
             freq["percent"] = freq["count"]/freq["count"].sum()*100
             az_map = {
@@ -974,14 +867,9 @@ try:
         st.markdown("---")
         st.subheader("🗺️ Tactical Map")
         try:
-            # Lat dan Lon disetel ke 0.0 karena API baru tidak menyediakannya.
-            # Map akan menampilkan di (0, 0) kecuali Anda mengganti nilai placeholder lat/lon.
-            lat = safe_float(now.get("lat", 0.0))
-            lon = safe_float(now.get("lon", 0.0))
-            if lat != 0.0 or lon != 0.0:
-                 st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
-            else:
-                 st.warning(f"Map coordinates are unavailable for ADM4 code {adm4_code}.")
+            lat = float(selected_entry.get("lokasi", {}).get("lat", 0))
+            lon = float(selected_entry.get("lokasi", {}).get("lon", 0))
+            st.map(pd.DataFrame({"lat":[lat],"lon":[lon]}))
         except Exception as e:
             st.warning(f"Map unavailable: {e}")
 
@@ -994,36 +882,28 @@ try:
         st.dataframe(df_sel)
 
 # =====================================
-# 💾 EXPORT (DIPERBARUI)
+# 💾 EXPORT
 # =====================================
     st.markdown("---")
     st.subheader("💾 Export Data")
-    if not df_sel.empty:
-        csv = df_sel.to_csv(index=False)
-        json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
-        colA, colB = st.columns(2)
-        with colA:
-            # Mengganti adm1 dengan adm4_code
-            st.download_button("⬇ CSV", csv, file_name=f"{adm4_code}_{loc_choice}.csv", mime="text/csv")
-        with colB:
-            # Mengganti adm1 dengan adm4_code
-            st.download_button("⬇ JSON", json_text, file_name=f"{adm4_code}_{loc_choice}.json", mime="application/json")
-    else:
-         st.info("No data available to export.")
+    # Tombol download QAM sudah dipindahkan ke dalam blok show_qam_report di atas.
+    csv = df_sel.to_csv(index=False)
+    json_text = df_sel.to_json(orient="records", force_ascii=False, date_format="iso")
+    colA, colB = st.columns(2)
+    with colA:
+        st.download_button("⬇ CSV", csv, file_name=f"{adm1}_{loc_choice}.csv", mime="text/csv")
+    with colB:
+        st.download_button("⬇ JSON", json_text, file_name=f"{adm1}_{loc_choice}.json", mime="application/json")
 
 
-# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY (DIPERBARUI)
+# BLOK EXCEPT DIMULAI DI SINI UNTUK MENUTUP BLOK TRY
 except requests.exceptions.HTTPError as e:
-    # HTTPError (e.g., 404 Not Found, 500 Server Error)
-    st.error(f"API Error: Could not fetch data. Check ADM4 Code and ensure the API is operational. Status code: {e.response.status_code}")
-    # st.exception(e) # Uncomment for detailed traceback if needed
+    st.error(f"API Error: Could not fetch data. Check Province Code (ADM1). Status code: {e.response.status_code}")
 except requests.exceptions.ConnectionError:
-    # Connection Error yang diharapkan
-    st.error("Connection Error: Could not connect to BMKG Data Terbuka API. Check your internet connection or the external API status.")
+    st.error("Connection Error: Could not connect to BMKG API.")
 except Exception as e:
-    # Error lain yang tidak terduga.
+    # Error ini akan menangkap error lain yang tidak terduga.
     st.error(f"An unexpected error occurred: {e}")
-    # st.exception(e) # Uncomment for detailed traceback if needed
 
 # =====================================
 # ⚓ FOOTER
@@ -1031,7 +911,7 @@ except Exception as e:
 st.markdown("""
 ---
 <div style="text-align:center; color:#7a7; font-size:0.9rem;">
-Tactical Weather Ops Dashboard — BMKG Data Terbuka © 2025<br>
+Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
 Military Ops UI · Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
