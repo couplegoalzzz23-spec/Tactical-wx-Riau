@@ -916,111 +916,121 @@ Military Ops UI · Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
 # =========================================================
-# 🛰️ SATELLITE & RADAR INTELLIGENCE (APPENDED MODULE)
-# (NO MODIFICATION TO ORIGINAL SCRIPT)
+# 🛰️ SATELLITE & RADAR INTELLIGENCE — FIXED VERSION
+# (APPEND ONLY — SAFE, NO CHANGE TO ORIGINAL SCRIPT)
 # =========================================================
+
+import streamlit.components.v1 as components
+from PIL import Image
+from io import BytesIO
 
 st.markdown("---")
 st.subheader("🛰️ Satellite & Radar Weather Intelligence")
 
 # ============================
-# Sidebar controls (new)
+# Sidebar Controls
 # ============================
 with st.sidebar:
     st.markdown("---")
-    st.subheader("🛰️ Satellite / Radar Layers")
-    show_satellite = st.checkbox("Show Satellite Imagery", value=True)
-    show_radar = st.checkbox("Show Weather Radar", value=True)
-    sat_type = st.selectbox(
-        "Satellite Type",
+    st.subheader("🛰️ Intel Layers")
+    enable_sat = st.checkbox("Enable Satellite", value=True)
+    enable_radar = st.checkbox("Enable Radar (Live)", value=True)
+    sat_mode = st.selectbox(
+        "Satellite Mode",
         ["IR Enhanced", "IR Standard", "Visible (Daytime)"],
         index=0
     )
 
 # ============================
-# Satellite Image URLs (BMKG)
+# SATELLITE CONFIG (SAFE IMAGE)
 # ============================
-SATELLITE_URLS = {
+SAT_URL = {
     "IR Enhanced": "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_EH_Indonesia.png",
     "IR Standard": "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_IR_Indonesia.png",
     "Visible (Daytime)": "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_VIS_Indonesia.png"
 }
 
-# ============================
-# Radar Image URLs (BMKG)
-# ============================
-RADAR_URLS = {
-    "National Composite": "https://inderaja.bmkg.go.id/IMAGE/RadarComposite/Indonesia.png",
-    "Jakarta Region": "https://inderaja.bmkg.go.id/IMAGE/RadarComposite/Jabodetabek.png"
-}
+if enable_sat:
+    st.markdown("### 🌏 Himawari-8 Satellite (BMKG)")
 
-# ============================
-# Display Satellite
-# ============================
-if show_satellite:
-    st.markdown("### 🌏 Himawari-8 Satellite Imagery")
-
-    sat_url = SATELLITE_URLS.get(sat_type)
-
-    if sat_url:
+    try:
         st.image(
-            sat_url,
-            caption=f"Himawari-8 | {sat_type} | Source: BMKG",
+            SAT_URL[sat_mode],
+            caption=f"Himawari-8 | {sat_mode} | BMKG",
             use_container_width=True
         )
         st.caption(
-            "Interpretation: Cold cloud tops (bright/white on IR) indicate deep convection "
+            "IR imagery highlights cloud-top temperature. "
+            "Brighter/whiter regions indicate deep convection "
             "and potential heavy rainfall or thunderstorms."
         )
-    else:
+    except Exception:
         st.warning("Satellite image unavailable.")
 
 # ============================
-# Display Radar
+# RADAR — LIVE IFRAME (PRIMARY)
 # ============================
-if show_radar:
-    st.markdown("### 🌧️ Weather Radar Composite")
+if enable_radar:
+    st.markdown("### 🌧️ Weather Radar Composite (LIVE)")
 
-    col_r1, col_r2 = st.columns(2)
-
-    with col_r1:
-        st.image(
-            RADAR_URLS["National Composite"],
-            caption="Weather Radar Composite — Indonesia | BMKG",
-            use_container_width=True
+    try:
+        components.iframe(
+            "https://inderaja.bmkg.go.id/Radar",
+            height=540,
+            scrolling=True
         )
 
-    with col_r2:
-        st.image(
-            RADAR_URLS["Jakarta Region"],
-            caption="Weather Radar — Jabodetabek | BMKG",
-            use_container_width=True
+        st.caption(
+            "Live radar viewer from BMKG. "
+            "Use zoom and layer controls directly inside the frame."
         )
 
-    st.caption(
-        "Radar reflects precipitation intensity. "
-        "Green–yellow indicates light–moderate rain, "
-        "red–purple indicates heavy rain or convective cells."
-    )
+    except Exception:
+        st.warning("Live radar iframe unavailable. Switching to fallback mode.")
+
+        # ============================
+        # RADAR FALLBACK — STATIC SNAPSHOT
+        # ============================
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://inderaja.bmkg.go.id/"
+            }
+            r = requests.get(
+                "https://inderaja.bmkg.go.id/IMAGE/RadarComposite/Indonesia.png",
+                headers=headers,
+                timeout=10
+            )
+            img = Image.open(BytesIO(r.content))
+            st.image(
+                img,
+                caption="Radar Composite Snapshot — Indonesia | BMKG",
+                use_container_width=True
+            )
+        except Exception:
+            st.error("Radar data unavailable due to source restriction.")
 
 # ============================
-# Tactical Interpretation Box
+# TACTICAL INTERPRETATION BOX
 # ============================
 st.markdown(
     """
 <div style="
-    margin-top:15px;
-    padding:14px;
+    margin-top:16px;
+    padding:16px;
     border:1px solid #2b3c2b;
-    border-radius:10px;
+    border-radius:12px;
     background:#0f1111;
     color:#cfd2c3;
-    font-size:0.9rem;
+    font-size:0.92rem;
 ">
-<b>🧠 Tactical Use:</b><br>
-• Satellite IR → cloud top height & convective growth<br>
-• Radar → real-time precipitation & storm tracking<br>
-• Combined with surface forecast → improved takeoff/landing risk assessment
+<b>🧠 Tactical Interpretation</b><br><br>
+• <b>Satellite IR</b> → Cloud-top height, convective growth, CB detection<br>
+• <b>Radar</b> → Real-time precipitation intensity & storm movement<br>
+• <b>Combined Analysis</b> → Enhanced take-off / landing risk assessment<br><br>
+<span style="color:#9adf4f;">
+Recommended for aviation operations, weather briefing, and tactical planning.
+</span>
 </div>
 """,
     unsafe_allow_html=True
