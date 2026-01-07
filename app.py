@@ -1035,4 +1035,3 @@ Recommended for aviation operations, weather briefing, and tactical planning.
 """,
     unsafe_allow_html=True
 )
-
