@@ -1125,4 +1125,125 @@ Tidak perlu menghafal kode wilayah.
 )
 
 st.caption("ADM1 Helper · Safe Override via Session State · BMKG Compatible")
+# =========================================================
+# 🛫 ADM2 + ICAO AUTO SELECTOR — SAFE APPEND
+# (NO MODIFICATION TO ORIGINAL SCRIPT)
+# =========================================================
+
+st.markdown("---")
+st.subheader("🛫 Aerodrome & City Selector (ADM2 + ICAO)")
+
+# =========================================================
+# ADM2 DATABASE (SIMPLIFIED — MAJOR OPS AREAS)
+# =========================================================
+ADM2_ICAO_MAP = {
+    "32": {  # Jawa Barat
+        "Bandung": "WICC",
+        "Bandara Kertajati (Majalengka)": "WICA",
+        "Bogor": "WIII",
+        "Bekasi": "WIII",
+        "Cirebon": "WICA",
+        "Tasikmalaya": "WICM"
+    },
+    "31": {  # DKI Jakarta
+        "Soekarno-Hatta Intl": "WIII",
+        "Halim Perdanakusuma": "WIHH"
+    },
+    "33": {  # Jawa Tengah
+        "Semarang (Ahmad Yani)": "WARS",
+        "Solo (Adi Soemarmo)": "WARQ",
+        "Yogyakarta Intl (YIA)": "WAHI"
+    },
+    "34": {  # DIY
+        "Yogyakarta Intl (YIA)": "WAHI",
+        "Adisutjipto": "WARJ"
+    },
+    "35": {  # Jawa Timur
+        "Surabaya (Juanda)": "WARR",
+        "Malang (Abdul Rachman Saleh)": "WARA",
+        "Banyuwangi": "WADY"
+    },
+    "36": {  # Banten
+        "Serang": "WIII",
+        "Tangerang (Soetta)": "WIII"
+    },
+    "51": {  # Bali
+        "Denpasar (Ngurah Rai)": "WADD"
+    },
+    "71": {  # Sulawesi Utara
+        "Manado (Sam Ratulangi)": "WAMM"
+    },
+    "73": {  # Sulawesi Selatan
+        "Makassar (Sultan Hasanuddin)": "WAAA"
+    },
+    "81": {  # Maluku
+        "Ambon (Pattimura)": "WAPP"
+    },
+    "91": {  # Papua Barat
+        "Sorong (Domine Eduard Osok)": "WASS"
+    },
+    "94": {  # Papua
+        "Jayapura (Sentani)": "WAJJ"
+    }
+}
+
+# =========================================================
+# GET CURRENT ADM1 FROM SESSION
+# =========================================================
+current_adm1 = st.session_state.get("adm1", "32")
+
+if current_adm1 not in ADM2_ICAO_MAP:
+    st.warning("ADM2 data belum tersedia untuk provinsi ini.")
+else:
+    adm2_options = list(ADM2_ICAO_MAP[current_adm1].keys())
+
+    # =====================================================
+    # ADM2 SELECTOR
+    # =====================================================
+    selected_adm2 = st.selectbox(
+        "Pilih Kota / Bandara Operasi (ADM2)",
+        adm2_options
+    )
+
+    # =====================================================
+    # ICAO AUTO DETECTION
+    # =====================================================
+    auto_icao = ADM2_ICAO_MAP[current_adm1][selected_adm2]
+
+    # =====================================================
+    # SESSION STATE INJECTION (SAFE)
+    # =====================================================
+    st.session_state["adm2"] = selected_adm2
+    st.session_state["icao_code"] = auto_icao
+
+    # =====================================================
+    # VISUAL CONFIRMATION PANEL
+    # =====================================================
+    st.markdown(
+        f"""
+    <div style="
+        margin-top:12px;
+        padding:16px;
+        border:1px solid #2b3c2b;
+        border-radius:12px;
+        background:#0f1111;
+        color:#cfd2c3;
+    ">
+    <b>Operational Area:</b> {selected_adm2}<br>
+    <b>ADM1:</b> {current_adm1}<br>
+    <b>ICAO Code:</b> 
+    <span style="color:#9adf4f; font-weight:700; font-size:1.1rem;">
+    {auto_icao}
+    </span><br><br>
+    <span style="font-size:0.85rem; color:#9fa8a0;">
+    ICAO code otomatis digunakan untuk QAM / MET Report.<br>
+    ADM2 digunakan sebagai referensi wilayah operasi.
+    </span>
+    </div>
+    """,
+        unsafe_allow_html=True
+    )
+
+st.caption("ADM2 + ICAO Auto Selector · Aviation Ops Ready · BMKG Compatible")
+
 
