@@ -968,70 +968,14 @@ if enable_sat:
         st.warning("Satellite image unavailable.")
 
 # ============================
-# RADAR — LIVE IFRAME (PRIMARY)
-# ============================
-if enable_radar:
-    st.markdown("### 🌧️ Weather Radar Composite (LIVE)")
+import streamlit as st
 
-    try:
-        components.iframe(
-            "https://202.90.198.22/IMAGE/HIMA/H08_RP_Indonesia.png",
-            height=540,
-            scrolling=True
-        )
+st.set_page_config(page_title="Rainfall Potential | Himawari-8", layout="wide")
 
-        st.caption(
-            "Live radar viewer from BMKG. "
-            "Use zoom and layer controls directly inside the frame."
-        )
+st.title("🌧️ Himawari-8 Rainfall Potential — Indonesia")
 
-    except Exception:
-        st.warning("Live radar iframe unavailable. Switching to fallback mode.")
-
-        # ============================
-        # RADAR FALLBACK — STATIC SNAPSHOT
-        # ============================
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Referer": "https://202.90.198.22/IMAGE/HIMA/H08_RP_Indonesia.png"
-            }
-            r = requests.get(
-                "https://202.90.198.22/IMAGE/HIMA/H08_RP_Indonesia.png",
-                headers=headers,
-                timeout=10
-            )
-            img = Image.open(BytesIO(r.content))
-            st.image(
-                img,
-                caption="Radar Composite Snapshot — Indonesia | BMKG",
-                use_container_width=True
-            )
-        except Exception:
-            st.error("Radar data unavailable due to source restriction.")
-
-# ============================
-# TACTICAL INTERPRETATION BOX
-# ============================
-st.markdown(
-    """
-<div style="
-    margin-top:16px;
-    padding:16px;
-    border:1px solid #2b3c2b;
-    border-radius:12px;
-    background:#0f1111;
-    color:#cfd2c3;
-    font-size:0.92rem;
-">
-<b>🧠 Tactical Interpretation</b><br><br>
-• <b>Satellite IR</b> → Cloud-top height, convective growth, CB detection<br>
-• <b>Radar</b> → Real-time precipitation intensity & storm movement<br>
-• <b>Combined Analysis</b> → Enhanced take-off / landing risk assessment<br><br>
-<span style="color:#9adf4f;">
-Recommended for aviation operations, weather briefing, and tactical planning.
-</span>
-</div>
-""",
-    unsafe_allow_html=True
+st.image(
+    "http://202.90.198.22/IMAGE/HIMA/H08_RP_Indonesia.png",
+    caption="Rainfall Potential (RP) | BMKG Himawari-8",
+    use_container_width=True
 )
