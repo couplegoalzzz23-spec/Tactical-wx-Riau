@@ -1,6 +1,6 @@
 # =========================================================
 # 🛰 Tactical Weather Ops Dashboard — BMKG
-# FINAL STABLE VERSION (STREAMLIT CLOUD SAFE)
+# FINAL — STREAMLIT CLOUD SAFE
 # =========================================================
 
 import streamlit as st
@@ -14,28 +14,21 @@ from datetime import datetime
 # =========================================================
 # ⚙️ PAGE CONFIG
 # =========================================================
-st.set_page_config(
-    page_title="Tactical Weather Ops — BMKG",
-    layout="wide"
-)
+st.set_page_config(page_title="Tactical Weather Ops — BMKG", layout="wide")
 
 # =========================================================
-# 🎨 CSS — TACTICAL DARK
+# 🎨 CSS
 # =========================================================
 st.markdown("""
 <style>
 body { background:#0b0c0c; color:#cfd2c3; font-family:Consolas, monospace; }
 h1,h2,h3 { color:#a9df52; }
 section[data-testid="stSidebar"] { background:#111; }
-.metric { background:#111; padding:16px; border-radius:10px; border:1px solid #2f3a2f; }
-.badge-ok { background:#b6ff6d; color:#002b00; padding:4px 8px; border-radius:6px; font-weight:700; }
-.badge-warn { background:#ffd86b; color:#4a3b00; padding:4px 8px; border-radius:6px; font-weight:700; }
-.badge-no { background:#ff6b6b; color:#2b0000; padding:4px 8px; border-radius:6px; font-weight:700; }
 </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 📡 API CONFIG
+# 📡 API
 # =========================================================
 API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
 MS_TO_KT = 1.94384
@@ -60,7 +53,7 @@ def flatten(entry):
             rows.append(o)
     df = pd.DataFrame(rows)
     for c in ["t","hu","ws","wd_deg","vs","tp","tcc"]:
-        if c in df:
+        if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     df["ws_kt"] = df["ws"] * MS_TO_KT
     return df
@@ -78,7 +71,8 @@ with st.sidebar:
 # 📡 LOAD DATA
 # =========================================================
 st.title("🛰 Tactical Weather Ops — BMKG")
-with st.spinner("Fetching weather intelligence..."):
+
+with st.spinner("Fetching BMKG data..."):
     raw = fetch_forecast(adm1)
 
 entries = raw.get("data", [])
@@ -91,14 +85,14 @@ loc = st.selectbox("Select Location", list(locations.keys()))
 df = flatten(locations[loc])
 
 if df.empty:
-    st.warning("No valid data")
+    st.warning("No valid weather data")
     st.stop()
 
 df = df.sort_values("local_dt")
 now = df.iloc[0]
 
 # =========================================================
-# ✈ FLIGHT WEATHER STATUS
+# ✈ FLIGHT STATUS
 # =========================================================
 st.markdown("### ✈ Flight Weather Status")
 c1,c2,c3,c4 = st.columns(4)
@@ -108,7 +102,7 @@ c3.metric("Wind (KT)", f"{now.get('ws_kt',0):.1f}")
 c4.metric("Visibility (m)", now.get("vs","—"))
 
 # =========================================================
-# 📊 TRENDS
+# 📊 TRENDS (SAFE)
 # =========================================================
 st.markdown("### 📊 Trends")
 st.plotly_chart(px.line(df, x="local_dt", y="t", title="Temperature"), use_container_width=True)
@@ -116,43 +110,61 @@ st.plotly_chart(px.line(df, x="local_dt", y="ws_kt", title="Wind Speed (KT)"), u
 st.plotly_chart(px.bar(df, x="local_dt", y="tp", title="Rainfall"), use_container_width=True)
 
 # =========================================================
-# 🌪 WINDROSE
+# 🌪 WINDROSE (FIXED — NO JSON ERROR)
 # =========================================================
 st.markdown("### 🌪 Windrose")
-if {"wd_deg","ws_kt"}.issubset(df.columns):
-    d = df.dropna(subset=["wd_deg","ws_kt"])
-    d["dir"] = pd.cut(d["wd_deg"]%360, bins=np.arange(-11.25,360,22.5))
-    fig = px.histogram(d, x="dir", y="ws_kt")
-    st.plotly_chart(fig, use_container_width=True)
+
+try:
+    df_wr = df.dropna(subset=["wd_deg","ws_kt"]).copy()
+    if not df_wr.empty:
+        bins = np.arange(-11.25, 360, 22.5)
+        labels = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                  "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+
+        df_wr["dir_sector"] = pd.cut(
+            df_wr["wd_deg"] % 360,
+            bins=bins,
+            labels=labels,
+            include_lowest=True
+        ).astype(str)   # 🔑 FIX UTAMA
+
+        fig_wr = px.histogram(
+            df_wr,
+            x="dir_sector",
+            y="ws_kt",
+            histfunc="avg",
+            title="Wind Direction vs Speed (KT)"
+        )
+        st.plotly_chart(fig_wr, use_container_width=True)
+    else:
+        st.info("Windrose data not available.")
+except Exception as e:
+    st.warning("Windrose unavailable due to data format.")
+    st.caption(str(e))
 
 # =========================================================
 # 🗺 MAP
 # =========================================================
 if show_map:
-    st.map(pd.DataFrame({"lat":[now["lat"]],"lon":[now["lon"]]}))
+    try:
+        st.map(pd.DataFrame({"lat":[now["lat"]],"lon":[now["lon"]]}))
+    except Exception:
+        st.info("Map unavailable.")
 
 # =========================================================
-# 🛰️ SATELLITE & RADAR (REFERENCE ONLY)
+# 🛰 SATELLITE & RADAR (REFERENCE ONLY)
 # =========================================================
 st.markdown("### 🛰 Satellite & Radar (Reference Only)")
-st.info("For situational awareness only. Tactical decisions rely on METAR / TAF / ATC.")
+st.info("Situational awareness only — not for tactical separation.")
 
 tab1,tab2,tab3 = st.tabs(["🌑 IR","☁ VIS","🌧 Radar"])
 
 with tab1:
-    st.markdown("""
-    <iframe src="https://www.bmkg.go.id/satelit/" width="100%" height="500" style="border:none;"></iframe>
-    """, unsafe_allow_html=True)
-
+    st.markdown("""<iframe src="https://www.bmkg.go.id/satelit/" width="100%" height="500"></iframe>""", unsafe_allow_html=True)
 with tab2:
-    st.markdown("""
-    <iframe src="https://www.bmkg.go.id/satelit/" width="100%" height="500" style="border:none;"></iframe>
-    """, unsafe_allow_html=True)
-
+    st.markdown("""<iframe src="https://www.bmkg.go.id/satelit/" width="100%" height="500"></iframe>""", unsafe_allow_html=True)
 with tab3:
-    st.markdown("""
-    <iframe src="https://www.bmkg.go.id/cuaca/radar-cuaca.bmkg" width="100%" height="500" style="border:none;"></iframe>
-    """, unsafe_allow_html=True)
+    st.markdown("""<iframe src="https://www.bmkg.go.id/cuaca/radar-cuaca.bmkg" width="100%" height="500"></iframe>""", unsafe_allow_html=True)
 
 # =========================================================
 # 📋 TABLE
@@ -167,6 +179,6 @@ st.markdown("""
 ---
 <div style="text-align:center;color:#7a7;">
 Tactical Weather Ops — BMKG<br>
-Situational Awareness Only
+Reference & Situational Awareness Only
 </div>
 """, unsafe_allow_html=True)
