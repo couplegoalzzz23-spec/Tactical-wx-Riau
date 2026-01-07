@@ -915,32 +915,27 @@ Tactical Weather Ops Dashboard — BMKG Data © 2025<br>
 Military Ops UI · Streamlit + Plotly
 </div>
 """, unsafe_allow_html=True)
-# =========================================================
-# 🛰️ SATELLITE & RADAR INTELLIGENCE — FIXED VERSION
-# (APPEND ONLY — SAFE, NO CHANGE TO ORIGINAL SCRIPT)
-# =========================================================
-
-import streamlit.components.v1 as components
-from PIL import Image
-from io import BytesIO
-
-st.markdown("---")
-st.subheader("🛰️ Satellite & Radar Weather Intelligence")
-
 # ============================
-# Sidebar Controls
+# RADAR — STATIC IMAGE (HIMA RP)
 # ============================
-with st.sidebar:
-    st.markdown("---")
-    st.subheader("🛰️ Intel Layers")
-    enable_sat = st.checkbox("Enable Satellite", value=True)
-    enable_radar = st.checkbox("Enable Radar (Live)", value=True)
-    sat_mode = st.selectbox(
-        "Satellite Mode",
-        ["IR Enhanced", "IR Standard", "Visible (Daytime)"],
-        index=0
-    )
+if enable_radar:
+    st.markdown("### 🌧️ Weather Radar / Precipitation Product")
 
+    try:
+        st.image(
+            "http://202.90.198.22/IMAGE/HIMA/H08_RP_Indonesia.png",
+            caption="Himawari-8 Rainfall Potential (RP) — Indonesia | BMKG",
+            use_container_width=True
+        )
+
+        st.caption(
+            "Rainfall Potential (RP) product from Himawari-8. "
+            "Highlights areas with high precipitation probability "
+            "based on cloud microphysics and IR analysis."
+        )
+
+    except Exception:
+        st.warning("Radar / RP imagery unavailable from source.")
 # ============================
 # SATELLITE CONFIG (SAFE IMAGE)
 # ============================
@@ -1035,3 +1030,4 @@ Recommended for aviation operations, weather briefing, and tactical planning.
 """,
     unsafe_allow_html=True
 )
+
