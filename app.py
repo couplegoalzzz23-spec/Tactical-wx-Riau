@@ -1035,3 +1035,94 @@ Recommended for aviation operations, weather briefing, and tactical planning.
 """,
     unsafe_allow_html=True
 )
+# =========================================================
+# 🗺️ ADM1 REGION SELECTOR — SAFE APPEND (NO CORE MODIFIED)
+# =========================================================
+
+st.markdown("---")
+st.subheader("🗺️ Province / Region Selector (ADM1 Helper)")
+
+# ============================
+# ADM1 LOOKUP TABLE (BMKG)
+# ============================
+ADM1_MAP = {
+    "Aceh": "11",
+    "Sumatera Utara": "12",
+    "Sumatera Barat": "13",
+    "Riau": "14",
+    "Jambi": "15",
+    "Sumatera Selatan": "16",
+    "Bengkulu": "17",
+    "Lampung": "18",
+    "Kepulauan Bangka Belitung": "19",
+    "Kepulauan Riau": "21",
+    "DKI Jakarta": "31",
+    "Jawa Barat": "32",
+    "Jawa Tengah": "33",
+    "DI Yogyakarta": "34",
+    "Jawa Timur": "35",
+    "Banten": "36",
+    "Bali": "51",
+    "Nusa Tenggara Barat": "52",
+    "Nusa Tenggara Timur": "53",
+    "Kalimantan Barat": "61",
+    "Kalimantan Tengah": "62",
+    "Kalimantan Selatan": "63",
+    "Kalimantan Timur": "64",
+    "Kalimantan Utara": "65",
+    "Sulawesi Utara": "71",
+    "Sulawesi Tengah": "72",
+    "Sulawesi Selatan": "73",
+    "Sulawesi Tenggara": "74",
+    "Gorontalo": "75",
+    "Sulawesi Barat": "76",
+    "Maluku": "81",
+    "Maluku Utara": "82",
+    "Papua Barat": "91",
+    "Papua": "94"
+}
+
+# ============================
+# UI SELECTOR
+# ============================
+selected_province = st.selectbox(
+    "Pilih Provinsi (Auto ADM1)",
+    options=list(ADM1_MAP.keys()),
+    index=list(ADM1_MAP.values()).index(
+        st.session_state.get("adm1", "32")
+    ) if "adm1" in st.session_state else 11
+)
+
+selected_adm1 = ADM1_MAP[selected_province]
+
+# ============================
+# SESSION STATE OVERRIDE
+# ============================
+st.session_state["adm1"] = selected_adm1
+
+# ============================
+# VISUAL CONFIRMATION
+# ============================
+st.markdown(
+    f"""
+<div style="
+    margin-top:12px;
+    padding:14px;
+    border:1px solid #2b3c2b;
+    border-radius:10px;
+    background:#0f1111;
+    color:#cfd2c3;
+">
+<b>Selected Region:</b> {selected_province}<br>
+<b>ADM1 Code:</b> <span style="color:#9adf4f; font-weight:700;">{selected_adm1}</span><br><br>
+<span style="font-size:0.85rem; color:#9fa8a0;">
+ADM1 otomatis digunakan oleh BMKG Forecast API.<br>
+Tidak perlu menghafal kode wilayah.
+</span>
+</div>
+""",
+    unsafe_allow_html=True
+)
+
+st.caption("ADM1 Helper · Safe Override via Session State · BMKG Compatible")
+
