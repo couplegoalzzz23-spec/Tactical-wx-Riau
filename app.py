@@ -1,129 +1,235 @@
-# ============================================================
-# 🛰️ SATELLITE IMAGERY (OPTIONAL — SAFE)
-# ============================================================
+# =========================================================
+# 🛰 Tactical Weather Ops — BMKG (DEPLOY READY)
+# =========================================================
+
+import streamlit as st
+import requests
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+
+# =========================================================
+# ⚙️ PAGE CONFIG
+# =========================================================
+st.set_page_config(
+    page_title="Tactical Weather Ops — BMKG",
+    page_icon="🛰",
+    layout="wide"
+)
+
+# =========================================================
+# 🌑 CSS — MILITARY / AVIATION STYLE
+# =========================================================
+st.markdown("""
+<style>
+body { background-color:#0b0c0c; color:#cfd2c3; font-family:Consolas, monospace; }
+h1,h2,h3 { color:#a9df52; letter-spacing:1px; }
+section[data-testid="stSidebar"] { background:#111; }
+hr { border-top:1px solid #2f3a2f; }
+.metric-label { font-size:0.7rem; color:#9fa8a0; text-transform:uppercase; }
+.metric-value { font-size:1.8rem; color:#b6ff6d; font-weight:700; }
+.flight-card { background:#0f1111; border:1px solid #2b3c2b; padding:18px; border-radius:10px; margin-bottom:20px; }
+.badge-green { background:#b6ff6d; color:#002b00; padding:4px 8px; border-radius:6px; font-weight:700; }
+.badge-yellow { background:#ffd86b; color:#4a3b00; padding:4px 8px; border-radius:6px; font-weight:700; }
+.badge-red { background:#ff6b6b; color:#2b0000; padding:4px 8px; border-radius:6px; font-weight:700; }
+</style>
+""", unsafe_allow_html=True)
+
+# =========================================================
+# 📡 BMKG API
+# =========================================================
+API_BASE = "https://cuaca.bmkg.go.id/api/df/v1/forecast/adm"
+MS_TO_KT = 1.94384
+
+# =========================================================
+# 🧰 FUNCTIONS
+# =========================================================
+@st.cache_data(ttl=300)
+def fetch_forecast(adm1):
+    r = requests.get(API_BASE, params={"adm1": adm1}, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+def flatten_entry(entry):
+    rows = []
+    lokasi = entry.get("lokasi", {})
+    for grp in entry.get("cuaca", []):
+        for o in grp:
+            r = o.copy()
+            r.update(lokasi)
+            r["local_datetime_dt"] = pd.to_datetime(r.get("local_datetime"), errors="coerce")
+            r["utc_datetime_dt"] = pd.to_datetime(r.get("utc_datetime"), errors="coerce")
+            rows.append(r)
+    df = pd.DataFrame(rows)
+    for c in ["t","hu","tp","tcc","wd_deg","ws","vs"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["ws_kt"] = df.get("ws",0) * MS_TO_KT
+    return df
+
+# =========================================================
+# 🎛 SIDEBAR
+# =========================================================
+with st.sidebar:
+    st.title("🛰 Tactical Controls")
+    adm1 = st.text_input("Province Code (ADM1)", value="32")
+    show_map = st.checkbox("Show Map", True)
+    show_table = st.checkbox("Show Table", False)
+    st.caption("BMKG Forecast API")
+
+# =========================================================
+# 📡 LOAD DATA
+# =========================================================
+st.title("🛰 Tactical Weather Operations — BMKG")
+
+try:
+    raw = fetch_forecast(adm1)
+except Exception as e:
+    st.error(f"BMKG API error: {e}")
+    st.stop()
+
+entries = raw.get("data", [])
+if not entries:
+    st.warning("No forecast data available")
+    st.stop()
+
+mapping = {}
+for e in entries:
+    loc = e.get("lokasi", {})
+    label = loc.get("kotkab","Unknown")
+    mapping[label] = e
+
+loc_choice = st.selectbox("🎯 Select Location", list(mapping.keys()))
+entry = mapping[loc_choice]
+
+df = flatten_entry(entry)
+if df.empty:
+    st.stop()
+
+df = df.sort_values("local_datetime_dt")
+df_sel = df.copy()
+now = df_sel.iloc[0]
+
+# =========================================================
+# ✈ FLIGHT WEATHER STATUS
+# =========================================================
 st.markdown("---")
-st.subheader("🛰️ Satellite Overview (Situational Awareness)")
+st.markdown('<div class="flight-card">', unsafe_allow_html=True)
+st.subheader("✈ Flight Weather Status")
 
-with st.expander("📡 Show Satellite Imagery", expanded=False):
-    st.caption("Static satellite imagery for situational awareness only")
+c1,c2,c3,c4 = st.columns(4)
+with c1:
+    st.markdown("<div class='metric-label'>Temperature</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('t','—')} °C</div>", unsafe_allow_html=True)
+with c2:
+    st.markdown("<div class='metric-label'>Humidity</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('hu','—')} %</div>", unsafe_allow_html=True)
+with c3:
+    st.markdown("<div class='metric-label'>Wind</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('ws_kt',0):.1f} KT</div>", unsafe_allow_html=True)
+with c4:
+    st.markdown("<div class='metric-label'>Rain</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-value'>{now.get('tp','—')} mm</div>", unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
-    sat_tabs = st.tabs(["IR Enhanced", "Visible", "Water Vapor"])
-
-    with sat_tabs[0]:
-        st.image(
-            "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_IR_ENHANCED.png",
-            caption="Himawari-8 IR Enhanced — BMKG",
-            use_container_width=True
-        )
-
-    with sat_tabs[1]:
-        st.image(
-            "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_VIS.png",
-            caption="Himawari-8 Visible — BMKG",
-            use_container_width=True
-        )
-
-    with sat_tabs[2]:
-        st.image(
-            "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_WV.png",
-            caption="Himawari-8 Water Vapor — BMKG",
-            use_container_width=True
-        )
-
-    st.caption("⚠️ Delay ±10–15 minutes | Not for navigation")
-
-
-# ============================================================
-# ⚠️ SIGNIFICANT WEATHER WARNING (AUTO — NO API EXTRA)
-# ============================================================
+# =========================================================
+# ⚠ SIGNIFICANT WEATHER WARNING
+# =========================================================
 st.markdown("---")
-st.subheader("⚠️ Significant Weather Assessment")
+st.subheader("⚠ Significant Weather Advisory")
 
 warnings = []
+if now.get("ws_kt",0) >= 30:
+    warnings.append(("DANGER","High surface wind ≥30 KT"))
+elif now.get("ws_kt",0) >= 20:
+    warnings.append(("CAUTION","Strong wind ≥20 KT"))
 
-# --- WIND ---
-if pd.notna(now.get("ws_kt")):
-    if now["ws_kt"] >= 30:
-        warnings.append(("🔴 HIGH WIND", "Surface wind ≥ 30 KT"))
-    elif now["ws_kt"] >= 20:
-        warnings.append(("🟠 STRONG WIND", "Surface wind ≥ 20 KT"))
+if now.get("vs",99999) < 3000:
+    warnings.append(("DANGER","Low visibility <3000 m"))
+elif now.get("vs",99999) < 5000:
+    warnings.append(("CAUTION","Marginal visibility"))
 
-# --- VISIBILITY ---
-if pd.notna(now.get("vs")):
-    if now["vs"] < 1000:
-        warnings.append(("🔴 LOW VISIBILITY", "< 1000 m"))
-    elif now["vs"] < 3000:
-        warnings.append(("🟠 REDUCED VISIBILITY", "< 3000 m"))
+if now.get("tp",0) >= 20:
+    warnings.append(("DANGER","Heavy rainfall"))
+elif now.get("tp",0) > 5:
+    warnings.append(("CAUTION","Moderate rainfall"))
 
-# --- RAINFALL ---
-if pd.notna(now.get("tp")):
-    if now["tp"] >= 20:
-        warnings.append(("🔴 HEAVY RAIN", "Runway contamination risk"))
-    elif now["tp"] > 5:
-        warnings.append(("🟠 MODERATE RAIN", "Wet runway"))
-
-# --- CLOUD / CB PROXY ---
-if pd.notna(now.get("tcc")) and now["tcc"] >= 75:
-    warnings.append(("🟠 OVERCAST", "Potential low ceiling"))
-
-if warnings:
-    for w in warnings:
-        st.warning(f"**{w[0]}** — {w[1]}")
+if not warnings:
+    st.success("No significant aviation hazards detected.")
 else:
-    st.success("✅ No significant weather hazards detected")
+    for lvl,msg in warnings:
+        if lvl=="DANGER": st.error(msg)
+        else: st.warning(msg)
 
-
-# ============================================================
-# 🧊 ICING & CB POTENTIAL (HEURISTIC — AVIATION AWARENESS)
-# ============================================================
+# =========================================================
+# 📈 TRENDS
+# =========================================================
 st.markdown("---")
-st.subheader("🧊 Aviation Hazard Potential")
+st.subheader("📈 Weather Trends")
 
-hazards = []
+c1,c2 = st.columns(2)
+with c1:
+    st.plotly_chart(px.line(df_sel,x="local_datetime_dt",y="t",title="Temperature (°C)"),use_container_width=True)
+    st.plotly_chart(px.line(df_sel,x="local_datetime_dt",y="hu",title="Humidity (%)"),use_container_width=True)
+with c2:
+    st.plotly_chart(px.line(df_sel,x="local_datetime_dt",y="ws_kt",title="Wind (KT)"),use_container_width=True)
+    st.plotly_chart(px.bar(df_sel,x="local_datetime_dt",y="tp",title="Rainfall (mm)"),use_container_width=True)
 
-# --- ICING (very simple proxy) ---
-if pd.notna(now.get("t")) and pd.notna(now.get("hu")):
-    if -10 <= now["t"] <= 5 and now["hu"] >= 80:
-        hazards.append("🧊 Possible Airframe Icing (High RH + Low Temp)")
-
-# --- CONVECTIVE ---
-if pd.notna(now.get("tcc")) and pd.notna(now.get("tp")):
-    if now["tcc"] > 70 and now["tp"] > 5:
-        hazards.append("⛈️ Convective / CB Potential (Cloud + Rain)")
-
-if hazards:
-    for h in hazards:
-        st.error(h)
-else:
-    st.success("No icing or convective hazard detected")
-
-
-# ============================================================
-# 🧭 CROSSWIND ADVISORY (RUNWAY-AGNOSTIC)
-# ============================================================
+# =========================================================
+# 🌪 WINDROSE
+# =========================================================
 st.markdown("---")
-st.subheader("🧭 Crosswind Advisory (Generic)")
+st.subheader("🌪 Windrose")
 
-if pd.notna(now.get("ws_kt")):
-    if now["ws_kt"] >= 25:
-        st.error("🚨 Severe crosswind potential — Check runway alignment")
-    elif now["ws_kt"] >= 15:
-        st.warning("⚠️ Moderate crosswind — Pilot discretion")
-    else:
-        st.success("✅ Crosswind within normal operational range")
-else:
-    st.info("Wind data unavailable for crosswind assessment")
+wr = df_sel.dropna(subset=["wd_deg","ws_kt"])
+if not wr.empty:
+    wr["sector"] = pd.cut(wr["wd_deg"]%360,np.arange(-11.25,360,22.5))
+    fig = px.histogram(wr,x="wd_deg",y="ws_kt",histfunc="avg",nbins=16,polar=True)
+    st.plotly_chart(fig,use_container_width=True)
 
+# =========================================================
+# 🛰 SATELLITE (SAFE IMAGE)
+# =========================================================
+st.markdown("---")
+st.subheader("🛰 Satellite Cloud Overview")
+st.image(
+    "https://rammb-slider.cira.colostate.edu/data/imagery/latest/himawari-9/full_disk/ir/latest.png",
+    caption="Himawari IR — Cloud Top (Situational Awareness)",
+    use_container_width=True
+)
 
-# ============================================================
-# 📘 DISCLAIMER — OPERATIONAL SAFETY
-# ============================================================
+# =========================================================
+# 🗺 MAP
+# =========================================================
+if show_map:
+    st.markdown("---")
+    st.subheader("🗺 Tactical Map")
+    st.map(pd.DataFrame({"lat":[now.get("lat")],"lon":[now.get("lon")]}))
+
+# =========================================================
+# 📋 TABLE
+# =========================================================
+if show_table:
+    st.markdown("---")
+    st.subheader("📋 Forecast Table")
+    st.dataframe(df_sel,use_container_width=True)
+
+# =========================================================
+# 💾 EXPORT
+# =========================================================
+st.markdown("---")
+st.subheader("💾 Export")
+st.download_button("⬇ CSV", df_sel.to_csv(index=False), "forecast.csv")
+st.download_button("⬇ JSON", df_sel.to_json(orient="records"), "forecast.json")
+
+# =========================================================
+# ⚓ FOOTER
+# =========================================================
 st.markdown("""
 ---
-### ⚠️ Operational Disclaimer
-- This dashboard is **NOT a replacement** for official **METAR / TAF / SIGMET**
-- Satellite & hazard analysis are **heuristic / advisory**
-- Use **ATC, MET Office & Pilot-in-Command judgement** for final decision
-
-**Tactical Weather Ops Dashboard — BMKG**
+<div style="text-align:center; font-size:0.8rem; color:#7a7;">
+Tactical Weather Ops — BMKG © 2025<br>
+For situational awareness only. Refer to official METAR/TAF/SIGMET.
+</div>
 """, unsafe_allow_html=True)
